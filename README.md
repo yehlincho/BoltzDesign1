@@ -92,7 +92,6 @@ config = {
 }
 ```
 
-These control learning phases, temperature sampling, and architectural behavior during design.
 
 ---
 
