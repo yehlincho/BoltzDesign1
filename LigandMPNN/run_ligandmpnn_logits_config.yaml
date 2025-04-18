@@ -1,0 +1,59 @@
+# Model configuration
+model_type: "protein_mpnn"  # Choose from: protein_mpnn, ligand_mpnn, per_residue_label_membrane_mpnn, global_label_membrane_mpnn, soluble_mpnn
+checkpoint_protein_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"
+checkpoint_ligand_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt"
+checkpoint_Cas9_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/Cas9mpnn_v_48_020.pt"
+checkpoint_Luc7_mpnn: /home/jupyter-yehlin/LigandMPNN/LigandMPNN./model_params/Luc7mpnn_v_48_020.pt"
+checkpoint_per_residue_label_membrane_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/per_residue_label_membrane_mpnn_v_48_020.pt"
+checkpoint_global_label_membrane_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/global_label_membrane_mpnn_v_48_020.pt"
+checkpoint_soluble_mpnn: "/home/jupyter-yehlin/LigandMPNN/LigandMPNN/model_params/solublempnn_v_48_020.pt"
+
+# Input/Output configuration
+fasta_seq_separation: ":"
+verbose: 1
+pdb_path: ""
+pdb_path_multi: ""
+out_folder: ""
+file_ending: ""
+zero_indexed: 0
+save_stats: 0
+
+# Residue configuration
+fixed_residues: ""
+fixed_residues_multi: ""
+redesigned_residues: ""
+redesigned_residues_multi: ""
+
+# Amino acid bias configuration
+bias_AA: ""
+bias_AA_per_residue: ""
+bias_AA_per_residue_multi: ""
+omit_AA: ""
+omit_AA_per_residue: ""
+omit_AA_per_residue_multi: ""
+
+# Symmetry configuration
+symmetry_residues: ""
+symmetry_weights: ""
+homo_oligomer: 0
+
+# Generation parameters
+seed: 0
+batch_size: 1
+number_of_batches: 1
+temperature: 0.1
+
+# Ligand MPNN specific
+ligand_mpnn_use_atom_context: 1
+ligand_mpnn_cutoff_for_score: 8.0
+ligand_mpnn_use_side_chain_context: 0
+chains_to_design: null
+parse_these_chains_only: ""
+
+# Transmembrane configuration
+transmembrane_buried: ""
+transmembrane_interface: ""
+global_transmembrane_label: 0
+
+# Parsing configuration
+parse_atoms_with_zero_occupancy: 0
