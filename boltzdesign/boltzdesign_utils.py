@@ -44,6 +44,15 @@ from matplotlib.animation import FuncAnimation
 from IPython.display import HTML, display
 import csv
 
+
+
+os.environ["PATH"] = "/home/jupyter-yehlin/.local/bin:" + os.environ["PATH"]
+
+boltz_path = shutil.which("boltz")
+if boltz_path is None:
+    raise FileNotFoundError("The 'boltz' command was not found in the system PATH. Make sure it is installed and accessible.")
+
+
 def visualize_training_history(loss_history, sequence_history, distogram_history, length, save_dir=None, save_filename=None, binder_chain='A'):
     """
     Visualize training history including loss plot, distogram animation, and sequence evolution animation.
@@ -1189,7 +1198,7 @@ def run_boltz_design(
                         with open(result_yaml, 'w') as f:
                             yaml.dump(data, f)
 
-                        subprocess.run(['boltz', 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                        subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
                         print(f"Completed processing {target_binder_input} iteration {itr + 1}")
 
                         shutil.copy2(yaml_path, apo_yaml)
@@ -1205,7 +1214,7 @@ def run_boltz_design(
                         
                         with open(apo_yaml, 'w') as f:
                             yaml.dump(data, f)
-                        subprocess.run(['boltz', 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
+                        subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
 
                         torch.cuda.empty_cache()
             except Exception as e:
