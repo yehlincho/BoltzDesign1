@@ -51,11 +51,18 @@ import numpy as np
 from boltz.data.parse.schema import parse_boltz_schema
 import yaml
 from pathlib import Path
-
+# Add project root and LigandMPNN to Python path
+import os
 import sys
-sys.path.append('/usr/local/lib/python3.11/site-packages/')
-sys.path.append('/home/jupyter-yehlin/Pairformer/')
-sys.path.append('/home/jupyter-yehlin/Pairformer/LigandMPNN')
+
+# Get the project root directory (parent of boltzdesign)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Add project root and LigandMPNN to path if not already there
+if project_root not in sys.path:
+    sys.path.append(project_root)
+if os.path.join(project_root, 'LigandMPNN') not in sys.path:
+    sys.path.append(os.path.join(project_root, 'LigandMPNN'))
 
 from prody import parsePDB
 import numpy as np
@@ -220,7 +227,7 @@ def get_protein_ligand_interface(pdb_id, cutoff=6, non_protein_ligand=True, bind
     return interface_residues
 
 
-def run_ligandmpnn_redesign(base_dir, pdb_dir, yaml_dir, top_k=5, cutoff=6, non_protein_ligand=True, binder_chain='A', target_chain='B'):
+def run_ligandmpnn_redesign(base_dir, pdb_dir, yaml_dir, ligandmpnn_config, top_k=5, cutoff=6, non_protein_ligand=True, binder_chain='A', target_chain='B'):
     out_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_fa')
     lmpnn_yaml_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_yaml')
     results_final_dir = os.path.join(base_dir, 'boltz_predictions_success_lmpnn')
@@ -244,7 +251,7 @@ def run_ligandmpnn_redesign(base_dir, pdb_dir, yaml_dir, top_k=5, cutoff=6, non_
             if pdb_path.endswith('.pdb'):
                 interface_residues= get_protein_ligand_interface(pdb_path, cutoff=cutoff, non_protein_ligand=non_protein_ligand, binder_chain=binder_chain, target_chain=target_chain)
                 print("len interface_residues", len(interface_residues))
-                with open("/home/jupyter-yehlin/LigandMPNN/LigandMPNN/run_ligandmpnn_logits_config.yaml", 'r') as f:
+                with open(ligandmpnn_config, 'r') as f:
                     config_dict = yaml.safe_load(f)
 
                 if non_protein_ligand:
