@@ -1,0 +1,10 @@
+version: 1  # Optional, defaults to 1
+sequences:
+  - protein:
+      id: [A]
+      sequence: 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+      msa: empty
+    #   msa: ./examples/msa/seq1.a3m
+  - ligand:
+      id: [B]
+      smiles: N[C@@H](Cc1ccc(O)cc1)C(=O)O
