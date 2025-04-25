@@ -140,7 +140,7 @@ class RelativePositionEncoder(Module):
                 a_rel_pos
             )
             X_b=torch.argmax(a_rel_pos[0],dim=-1)[:86, :86]
-            print("Are X_a and X_b identical?", torch.equal(X_a, X_b))
+            
 
         else:
             a_rel_pos = one_hot(d_residue, 2 * self.r_max + 2)
