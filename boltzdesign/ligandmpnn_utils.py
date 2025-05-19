@@ -348,7 +348,7 @@ def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=T
     return sorted(interface_indices)
 
 
-def run_ligandmpnn_redesign(base_dir, pdb_dir, yaml_dir, ligandmpnn_config, top_k=5, cutoff=6, non_protein_target=True, binder_chain='A', target_chains=['B'], fix_interface = True):
+def run_ligandmpnn_redesign(base_dir, pdb_dir, ccd_path, boltz_model, yaml_dir, ligandmpnn_config, top_k=5, cutoff=6, non_protein_target=True, binder_chain='A', target_chains=['B'], fix_interface = True, num_workers='1'):
     out_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_fa')
     lmpnn_yaml_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_yaml')
     results_final_dir = os.path.join(base_dir, 'boltz_predictions_success_lmpnn')
@@ -441,8 +441,23 @@ def run_ligandmpnn_redesign(base_dir, pdb_dir, yaml_dir, ligandmpnn_config, top_
                         yaml.dump(yaml_data, f)
 
                     import subprocess
-                    subprocess.run(['boltz', 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])
+                    # subprocess.run(['boltz', 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir),  '--num_workers', num_workers, '--write_full_pae'])
+                    # subprocess.run([
+                    #     'boltz', 'predict',
+                    #     str(final_yaml_path),
+                    #     '--out_dir', str(results_final_dir),
+                    #     '--num_workers', '1',
+                    #     '--write_full_pae'  # just the flag, no int after
+                    # ])
+                    
+                    predict(
+                        data=str(final_yaml_path),
+                        ccd_path=Path(ccd_path),
+                        out_dir=str(results_final_dir),
+                        model_module=boltz_model,
+                        accelerator="gpu",
+                        num_workers = 1
+                    )
                     print(f"Completed processing {pdb_name} for sequence {idx+1}")
-
 
 

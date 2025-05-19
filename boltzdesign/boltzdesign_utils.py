@@ -41,6 +41,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML, display
 import csv
+import gc
 
 # os.environ["PATH"] = "/home/jupyter-yehlin/.local/bin:" + os.environ["PATH"]
 
@@ -1106,6 +1107,7 @@ def run_boltz_design(
     version_name=None,
     config=None,
     loss_scales=None,
+    num_workers=2,
 ):
     """
     Run Boltz protein design pipeline.
@@ -1350,15 +1352,24 @@ def run_boltz_design(
                     with open(result_yaml, 'w') as f:
                         yaml.dump(data, f)
 
+                    boltz_model.predict_args['recycling_steps']=3
+                    boltz_model.predict_args['sampling_steps']=200
+                    boltz_model.predict_args['write_full_pae']=True
+
                     # subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
                     predict(
                         data=str(result_yaml),
-                        ccd_path=ccd_path,
+                        ccd_path=Path(ccd_path),
                         out_dir=str(results_final_dir),
                         model_module=boltz_model,
                         accelerator="gpu",
-                        write_full_pae=True,
+                        num_workers = 1
+                        devices=1
                     )
+
+                    del output, best_batch, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, output_cpu, best_batch_cpu, best_sequence, data
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
                     print(f"Completed processing {target_binder_input} iteration {itr + 1}")
                     # Handle apo structure - only keep the binder chain
@@ -1371,14 +1382,19 @@ def run_boltz_design(
                     with open(apo_yaml, 'w') as f:
                         yaml.dump(apo_data, f)
                     # subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
+
                     predict(
                         data=str(apo_yaml),
-                        ccd_path=ccd_path,
+                        ccd_path=Path(ccd_path),
                         out_dir=str(apo_dir),
                         model_module=boltz_model,
                         accelerator="gpu",
-                        write_full_pae=True,
+                        num_workers = 1
+                        devices=1
                     )
+                    # Free memory after apo predict
+                    del apo_data
+                    gc.collect()
                     torch.cuda.empty_cache()
 
             except Exception as e:
