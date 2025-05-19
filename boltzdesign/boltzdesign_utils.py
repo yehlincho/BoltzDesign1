@@ -5,7 +5,6 @@ import torch.optim as optim
 from pytorch_lightning import LightningModule, Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
-
 import subprocess
 import pickle
 import urllib.request
@@ -16,7 +15,6 @@ import copy
 import click
 from tqdm import tqdm
 import random
-
 from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
 from boltz.data.msa.mmseqs2 import run_mmseqs2
@@ -44,14 +42,123 @@ from matplotlib.animation import FuncAnimation
 from IPython.display import HTML, display
 import csv
 
+# os.environ["PATH"] = "/home/jupyter-yehlin/.local/bin:" + os.environ["PATH"]
 
-os.environ["PATH"] = "/home/jupyter-yehlin/.local/bin:" + os.environ["PATH"]
-
-boltz_path = shutil.which("boltz")
-if boltz_path is None:
-    raise FileNotFoundError("The 'boltz' command was not found in the system PATH. Make sure it is installed and accessible.")
+# boltz_path = shutil.which("boltz")
+# if boltz_path is None:
+#     raise FileNotFoundError("The 'boltz' command was not found in the system PATH. Make sure it is installed and accessible.")
 
 
+
+def predict(
+    data: str,
+    out_dir: str,
+    ccd_path: str,
+    model_module,  # Already loaded Boltz1 model
+    cache: str = "~/.boltz",
+    devices: int = 1,
+    accelerator: str = "gpu",
+    output_format: Literal["pdb", "mmcif"] = "mmcif",
+    num_workers: int = 2,
+    override: bool = False,
+    seed: Optional[int] = None,
+    use_msa_server: bool = False,
+    msa_server_url: str = "https://api.colabfold.com",
+    msa_pairing_strategy: str = "greedy",
+) -> None:
+    """Run predictions with a preloaded Boltz1 model."""
+
+    if accelerator == "cpu":
+        click.echo("Running on CPU, this will be slow. Consider using a GPU.")
+
+    torch.set_grad_enabled(False)
+    torch.set_float32_matmul_precision("highest")
+
+    if seed is not None:
+        from pytorch_lightning.utilities.seed import seed_everything
+        seed_everything(seed)
+
+    # Prepare paths
+    cache = Path(cache).expanduser()
+    cache.mkdir(parents=True, exist_ok=True)
+
+    data = Path(data).expanduser()
+    out_dir = Path(out_dir).expanduser()
+    out_dir = out_dir / f"boltz_results_{data.stem}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # # Ensure required files are available
+    # from boltz.utils.download import download
+    # download(cache)
+
+    from boltz.main import check_inputs
+    data = check_inputs(data, out_dir, override)
+    if not data:
+        click.echo("No predictions to run, exiting.")
+        return
+
+    print
+
+    # Distributed strategy
+    strategy = "auto"
+    if (isinstance(devices, int) and devices > 1) or (isinstance(devices, list) and len(devices) > 1):
+        strategy = DDPStrategy()
+        if len(data) < devices:
+            raise ValueError("Number of requested devices is greater than the number of predictions.")
+
+    click.echo(f"Running predictions for {len(data)} structure{'s' if len(data) > 1 else ''}")
+
+    # Input preprocessing
+    from boltz.main import process_inputs
+    process_inputs(
+        data=data,
+        out_dir=out_dir,
+        ccd_path=ccd_path,
+        use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        msa_pairing_strategy=msa_pairing_strategy,
+    )
+
+    # Load processed inputs
+    from boltz.main import Manifest, BoltzProcessedInput
+    processed_dir = out_dir / "processed"
+    processed = BoltzProcessedInput(
+        manifest=Manifest.load(processed_dir / "manifest.json"),
+        targets_dir=processed_dir / "structures",
+        msa_dir=processed_dir / "msa",
+    )
+
+    from boltz.main import BoltzInferenceDataModule
+    data_module = BoltzInferenceDataModule(
+        manifest=processed.manifest,
+        target_dir=processed.targets_dir,
+        msa_dir=processed.msa_dir,
+        num_workers=num_workers,
+    )
+
+    # Create writer and trainer
+    from boltz.main import BoltzWriter
+    pred_writer = BoltzWriter(
+        data_dir=processed.targets_dir,
+        output_dir=out_dir / "predictions",
+        output_format=output_format,
+    )
+
+    trainer = Trainer(
+        default_root_dir=out_dir,
+        strategy=strategy,
+        callbacks=[pred_writer],
+        accelerator=accelerator,
+        devices=devices,
+        precision=32,
+    )
+
+    # Run inference
+    trainer.predict(
+        model_module,
+        datamodule=data_module,
+        return_predictions=False,
+    )
 
 
 tokens = [
@@ -994,7 +1101,7 @@ def run_boltz_design(
     main_dir,
     yaml_dir,
     boltz_model,
-    ccd_lib,
+    ccd_path,
     design_samples =1,
     version_name=None,
     config=None,
@@ -1049,6 +1156,8 @@ def run_boltz_design(
 
     version_dir = os.path.join(main_dir, version_name)
     os.makedirs(version_dir, exist_ok=True)
+
+    ccd_lib = pickle.load(open(ccd_path, 'rb'))
     
     results_final_dir = os.path.join(version_dir, 'results_final')
     results_yaml_dir = os.path.join(version_dir, 'results_yaml')
@@ -1241,7 +1350,16 @@ def run_boltz_design(
                     with open(result_yaml, 'w') as f:
                         yaml.dump(data, f)
 
-                    subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                    # subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                    predict(
+                        data=str(result_yaml),
+                        ccd_path=ccd_path,
+                        out_dir=str(results_final_dir),
+                        model_module=boltz_model,
+                        accelerator="gpu",
+                        write_full_pae=True,
+                    )
+
                     print(f"Completed processing {target_binder_input} iteration {itr + 1}")
                     # Handle apo structure - only keep the binder chain
                     shutil.copy2(result_yaml, apo_yaml)
@@ -1252,7 +1370,15 @@ def run_boltz_design(
                     apo_data.pop('constraints', None)
                     with open(apo_yaml, 'w') as f:
                         yaml.dump(apo_data, f)
-                    subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
+                    # subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
+                    predict(
+                        data=str(apo_yaml),
+                        ccd_path=ccd_path,
+                        out_dir=str(apo_dir),
+                        model_module=boltz_model,
+                        accelerator="gpu",
+                        write_full_pae=True,
+                    )
                     torch.cuda.empty_cache()
 
             except Exception as e:
