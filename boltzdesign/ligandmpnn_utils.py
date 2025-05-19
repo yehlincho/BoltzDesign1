@@ -35,6 +35,7 @@ from boltz.data.feature import featurizer
 from boltz.data.tokenize.boltz import BoltzTokenizer, TokenData
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.parse.schema import parse_boltz_schema
+from boltzdesign_utils import predict
 
 from matplotlib.animation import FuncAnimation
 import numpy as np
@@ -441,6 +442,7 @@ def run_ligandmpnn_redesign(base_dir, pdb_dir, ccd_path, boltz_model, yaml_dir, 
                         yaml.dump(yaml_data, f)
 
                     import subprocess
+
                     # subprocess.run(['boltz', 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir),  '--num_workers', num_workers, '--write_full_pae'])
                     # subprocess.run([
                     #     'boltz', 'predict',
@@ -449,7 +451,7 @@ def run_ligandmpnn_redesign(base_dir, pdb_dir, ccd_path, boltz_model, yaml_dir, 
                     #     '--num_workers', '1',
                     #     '--write_full_pae'  # just the flag, no int after
                     # ])
-                    
+
                     predict(
                         data=str(final_yaml_path),
                         ccd_path=Path(ccd_path),
