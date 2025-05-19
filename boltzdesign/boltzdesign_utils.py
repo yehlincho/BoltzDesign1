@@ -1107,7 +1107,7 @@ def run_boltz_design(
     version_name=None,
     config=None,
     loss_scales=None,
-    num_workers=2,
+    num_workers=1,
 ):
     """
     Run Boltz protein design pipeline.
@@ -1363,7 +1363,7 @@ def run_boltz_design(
                         out_dir=str(results_final_dir),
                         model_module=boltz_model,
                         accelerator="gpu",
-                        num_workers = 1
+                        num_workers = num_workers,
                         devices=1
                     )
 
@@ -1389,7 +1389,7 @@ def run_boltz_design(
                         out_dir=str(apo_dir),
                         model_module=boltz_model,
                         accelerator="gpu",
-                        num_workers = 1
+                        num_workers = num_workers,
                         devices=1
                     )
                     # Free memory after apo predict
