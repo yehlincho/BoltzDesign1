@@ -572,14 +572,14 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     raise ValueError(msg)
 
             # Set the MSA, warn if passed in single-sequence mode
-            if msa == "empty":
-                msa = -1
-                msg = (
-                    "Found explicit empty MSA for some proteins, will run "
-                    "these in single sequence mode. Keep in mind that the "
-                    "model predictions will be suboptimal without an MSA."
-                )
-                click.echo(msg)
+            # if msa == "empty":
+            #     msa = -1
+            #     msg = (
+            #         "Found explicit empty MSA for some proteins, will run "
+            #         "these in single sequence mode. Keep in mind that the "
+            #         "model predictions will be suboptimal without an MSA."
+            #     )
+            #     click.echo(msg)
 
             if msa not in (0, -1):
                 is_msa_custom = True

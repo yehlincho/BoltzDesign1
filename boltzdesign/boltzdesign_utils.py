@@ -1039,7 +1039,7 @@ def boltz_hallucination(
     output_apo = _run_model(boltz_model, best_batch_apo, predict_args)
 
     prev_sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
-    prev_iptm = output['ligand_iptm'].detach().cpu().numpy()
+    prev_iptm = output['iptm'].detach().cpu().numpy()
 
     for step in range(semi_greedy_steps):
         confidence_score = []
@@ -1055,7 +1055,7 @@ def boltz_hallucination(
             best_batch, _ = _update_batches(data, data_apo)
             output = _run_model(boltz_model, best_batch, predict_args)
             
-            iptm = output['ligand_iptm'].detach().cpu().numpy()
+            iptm = output['iptm'].detach().cpu().numpy()
             confidence_score.append(iptm)
             mutated_sequence_ls.append(mutated_sequence)
             print(f"Step {step}, Epoch {t}, iptm {iptm}")

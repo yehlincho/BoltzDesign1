@@ -230,7 +230,7 @@ class ConfidenceModule(nn.Module):
                     out_dict[key] = pair_chains_iptm
             return out_dict
         if self.imitate_trunk:
-            print("imitation trunk")
+            
             s_inputs = self.input_embedder(feats)
 
             # Initialize the sequence and pairwise embeddings
@@ -249,7 +249,7 @@ class ConfidenceModule(nn.Module):
             z = z_init + self.z_recycle(self.z_norm(z))
 
         else:
-            print("not imitation trunk")
+            
             s_inputs = self.s_inputs_norm(s_inputs).repeat_interleave(multiplicity, 0)
             if not self.no_update_s:
                 s = self.s_norm(s)
