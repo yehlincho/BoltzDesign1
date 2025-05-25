@@ -220,17 +220,6 @@ def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, bind
         raise ValueError(f"Unsupported target type: {target_type}")
     return generate_yaml_for_taget_binder(pdb_code, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
 
-def generate_custom_yaml(target_name: str, target_type: str, target: list, config: Config, binder_id: str = 'A', constraints: dict = None, modifications: dict = None, use_msa: bool = False):
-    """Generate YAML with custom target sequence.
-    
-    Args:
-        target_name: Name for the target
-        target_type: Type of target ('rna', 'dna', 'protein', 'small_molecule')
-        target: List containing target sequence or SMILES
-        config: Configuration object
-        binder_id: Chain ID for the binder
-    """
-    return generate_yaml_for_taget_binder(target_name, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
     
 def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
     """
@@ -250,7 +239,7 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
         tuple: YAML content dictionary and output path
     """
     # Build chain dictionary
-    chain_dict = {binder_id: {'sequence': 'X' * 100}}
+    chain_dict = {binder_id: {'type': 'protein', 'sequence': 'X' * 100}}
 
     # Map target types to their YAML representation
     type_map = {
@@ -330,6 +319,200 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
     logger.info(f"Created YAML file for {name}")
     
     return yaml_content, output_path
+
+# def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
+#     """
+#     Generate YAML content for a small molecule binder with multiple targets and create the YAML file.
+    
+#     Args:
+#         name (str): Name/PDB code for the target
+#         type (str): Type of ligand ('small_molecule', 'dna', 'rna', 'metal', 'protein')
+#         targets (list): List of target information (SMILES, sequences, or CCD codes)
+#         binder_id (str): ID of the binder
+#         config (Config): Configuration object
+#         constraints (dict): Optional constraints to add to YAML
+#         modifications (dict): Optional modifications to add to YAML
+#         use_msa (bool): Whether to use MSA for proteins
+        
+#     Returns:
+#         tuple: YAML content dictionary and output path
+#     """
+#     # Build chain dictionary
+#     chain_dict = {}
+#     chain_dict[binder_id] = {
+#         'sequence': 'X' * 100,
+#     }
+
+#     # Add multiple targets with sequential IDs
+#     yaml_target_ids = []
+#     for i, target in enumerate(targets):
+#         target_id = chr(ord('A') + i + 1)  # Start from B, C, D, etc.
+#         yaml_target_ids.append(target_id)
+        
+#         chain_dict[target_id] = {
+#             'id': target_id,
+#             'sequence': target if type in ['protein', 'dna', 'rna'] else None,
+#             'smiles': target if type == 'small_molecule' else None,
+#             'ccd': target if type == 'metal' else None,
+#             'type': {
+#                 'protein': 'protein',
+#                 'small_molecule': 'ligand', 
+#                 'dna': 'dna',
+#                 'rna': 'rna',
+#                 'metal': 'metal'
+#             }[type],
+#             'msa': 'empty' if type == 'protein' else None
+#         }
+#         # Remove None values
+#         chain_dict[target_id] = {k:v for k,v in chain_dict[target_id].items() if v is not None}
+
+#     # Build sequences list for YAML
+#     sequences = []
+#     for chain_id, sequence in chain_dict.items():
+#         if isinstance(sequence, dict):
+#             if sequence.get('type') == 'ligand':
+#                 sequences.append({
+#                     "ligand": {
+#                         "id": [chain_id],
+#                         "smiles": sequence.get('smiles')
+#                     }
+#                 })
+#             elif sequence.get('type') == 'metal':
+#                 sequences.append({
+#                     "ligand": {
+#                         "id": [chain_id],
+#                         "ccd": sequence.get('ccd')
+#                     }
+#                 })
+#             elif sequence.get('type') in ['dna', 'rna']:
+#                 sequences.append({
+#                     sequence.get('type'): {
+#                         "id": [chain_id],
+#                         "sequence": sequence.get('sequence')
+#                     }
+#                 })
+#             else:  # protein
+#                 msa_path = (config.MSA_DIR / f"{name}_{chain_id}_env/msa.npz" 
+#                            if use_msa and not all(x == 'X' for x in sequence.get('sequence')) else "empty")
+                
+#                 protein_dict = {
+#                     "id": [chain_id],
+#                     "sequence": sequence.get('sequence'), 
+#                     "msa": str(msa_path)
+#                 }
+
+#                 if modifications and chain_id in yaml_target_ids:
+#                     protein_dict["modifications"] = modifications
+                    
+#                 sequences.append({"protein": protein_dict})
+    
+#     # Create final YAML content
+#     yaml_content = {
+#         "version": 1,
+#         "sequences": sequences
+#     }
+    
+#     if constraints:
+#         yaml_content["constraints"] = constraints
+
+#     # Write YAML file
+#     output_path = config.YAML_DIR / f"{name}.yaml"
+#     with open(output_path, 'w') as f:
+#         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
+#     logger.info(f"Created YAML file for {name}")
+    
+#     return yaml_content, output_path
+#         chain_dict[target_id] = {
+#             'id': target_id,
+#             'sequence': target if type == 'protein'else None,
+#             'smiles': target if type == 'small_molecule' else None,
+#             'ccd': target if type == 'metal' else None,
+#             'type': {
+#                 'protein': 'protein',
+#                 'small_molecule': 'ligand', 
+#                 'dna': 'dna',
+#                 'rna': 'rna',
+#                 'metal': 'metal'
+#             }[type],
+#             'msa': 'empty' if type == 'protein' else None
+#         }
+#         # Remove None values
+#         chain_dict[target_id] = {k:v for k,v in chain_dict[target_id].items() if v is not None}
+
+#     return create_yaml_file(
+#         pdb_code=name,
+#         chain_dict=chain_dict,
+#         yaml_target_ids=yaml_target_ids,
+#         config=config,
+#         use_msa=use_msa,
+#         constraints=constraints,
+#         modifications=modifications
+#     )
+
+# def create_yaml_file(pdb_code: str, chain_dict: dict, yaml_target_ids: list, config: Config, use_msa: bool = False, constraints: list = None, modifications: list = None) -> bool:
+#     """Create YAML configuration file for protein chains, ligands, and nucleic acids.
+    
+#     Args:
+#         pdb_code: PDB identifier
+#         chain_dict: Dictionary mapping chain IDs to sequences or sequence info dicts
+#         config: Configuration object
+#         msa_chains: List of chains that have MSA data
+#         constraints: Optional list of constraints to add to the YAML
+#         modifications: Optional list of modifications to add to the YAML
+#     """
+#     sequences = []
+#     for chain_id, sequence in chain_dict.items():
+#         if isinstance(sequence, dict):
+#             if sequence.get('type') == 'ligand':
+#                 sequences.append({
+#                     "ligand": {
+#                         "id": [chain_id],
+#                         "smiles": sequence.get('smiles')
+#                     }
+#                 })
+#             elif sequence.get('type') == 'metal':
+#                 sequences.append({
+#                     "ligand": {
+#                         "id": [chain_id],
+#                         "ccd": sequence.get('ccd')
+#                     }
+#                 })
+#             elif sequence.get('type') in ['dna', 'rna']:
+#                 sequences.append({
+#                     sequence.get('type'): {
+#                         "id": [chain_id],
+#                         "sequence": sequence.get('sequence')
+#                     }
+#                 })
+#             else:  # protein
+#                 msa_path = (config.MSA_DIR / f"{pdb_code}_{chain_id}_env/msa.npz" 
+#                            if use_msa and not all(x == 'X' for x in sequence.get('sequence')) else "empty")
+                
+#                 protein_dict = {
+#                     "id": [chain_id],
+#                     "sequence": sequence.get('sequence'), 
+#                     "msa": str(msa_path)
+#                 }
+
+#                 if modifications and chain_id in yaml_target_ids:
+#                     protein_dict["modifications"] = modifications
+                    
+#                 sequences.append({"protein": protein_dict})
+    
+#     yaml_content = {
+#         "version": 1,
+#         "sequences": sequences
+#     }
+    
+#     if constraints:
+#         yaml_content["constraints"] = constraints
+
+#     output_path = config.YAML_DIR / f"{pdb_code}.yaml"
+#     with open(output_path, 'w') as f:
+#         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
+#     logger.info(f"Created YAML file for {pdb_code}")
+#     return yaml_content, output_path
+
 
     
 def process_msa(chain_id: str, sequence: str, pdb_code: str, config: Config) -> bool:
