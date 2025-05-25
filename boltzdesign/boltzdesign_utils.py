@@ -1186,7 +1186,6 @@ def run_boltz_design(
                     config['length'] = random.randint(config['length_min'],config['length_max'])
                     loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
                     torch.cuda.empty_cache()
-                    output = None
                     print('pre-run warm up')
                     input_res_type, plots, loss_history, distogram_history, sequence_history = boltz_hallucination(
                         boltz_model,
@@ -1225,8 +1224,6 @@ def run_boltz_design(
                         msa_max_seqs=config['msa_max_seqs'],
                         optimizer_type=config['optimizer_type']
                     )
-                    if input_res_type is not None:
-                        break
                     print('warm up done')     
                     output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history = boltz_hallucination(
                         boltz_model,

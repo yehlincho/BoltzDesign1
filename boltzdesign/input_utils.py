@@ -189,7 +189,7 @@ def get_nucleotide_from_pdb(pdb_path):
     return sequences
 
 
-def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, binder_id: str = 'A', target_ids: list = None, target_mols: str = None, constraints: dict = None, use_msa: bool = False):
+def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, binder_id: str = 'A', target_ids: list = None, target_mols: str = None, constraints: dict = None, modifications: dict = None, use_msa: bool = False):
     """Generate YAML from PDB file.
     Args:
         pdb_code: PDB identifier
@@ -218,9 +218,9 @@ def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, bind
             target.append(chain_sequences[target_id])
     else:
         raise ValueError(f"Unsupported target type: {target_type}")
-    return generate_yaml_for_taget_binder(pdb_code, target_type, target, config=config, binder_id=binder_id, constraints=constraints, use_msa=use_msa)
+    return generate_yaml_for_taget_binder(pdb_code, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
 
-def generate_custom_yaml(target_name: str, target_type: str, target: list, config: Config, binder_id: str = 'A', constraints: dict = None, use_msa: bool = False):
+def generate_custom_yaml(target_name: str, target_type: str, target: list, config: Config, binder_id: str = 'A', constraints: dict = None, modifications: dict = None, use_msa: bool = False):
     """Generate YAML with custom target sequence.
     
     Args:
@@ -230,10 +230,10 @@ def generate_custom_yaml(target_name: str, target_type: str, target: list, confi
         config: Configuration object
         binder_id: Chain ID for the binder
     """
-    return generate_yaml_for_taget_binder(target_name, target_type, target, config=config, binder_id=binder_id, constraints=constraints, use_msa=use_msa)
+    return generate_yaml_for_taget_binder(target_name, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
 
 
-def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, use_msa: bool = False) -> dict:
+def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
     """
     Generate YAML content for a small molecule binder with multiple targets.
     
@@ -256,7 +256,6 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
     for i, target in enumerate(targets):
         target_id = chr(ord('A') + i + 1)  # Start from B, C, D, etc.
         if type == 'protein':
-
             chain_dict[target_id] = {
                 'type': 'protein',
                 'id': target_id,
@@ -294,10 +293,11 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
         chain_dict=chain_dict,
         config=config,
         use_msa=use_msa,
-        constraints=constraints
+        constraints=constraints,
+        modifications=modifications
     )
 
-def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: bool = False, constraints: list = None) -> bool:
+def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: bool = False, constraints: list = None, modifications: list = None) -> bool:
     """Create YAML configuration file for protein chains, ligands, and nucleic acids.
     
     Args:
@@ -306,6 +306,7 @@ def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: b
         config: Configuration object
         msa_chains: List of chains that have MSA data
         constraints: Optional list of constraints to add to the YAML
+        modifications: Optional list of modifications to add to the YAML
     """
     sequences = []
     for chain_id, sequence in chain_dict.items():
@@ -339,17 +340,23 @@ def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: b
                     "sequence": sequence.get('sequence')
                 }
             })
+            
         else:
             msa_path = (config.MSA_DIR / f"{pdb_code}_{chain_id}_env/msa.npz" 
-                       if use_msa and not all(x == 'X' for x in sequence.get('sequence')) else "empty")
+                       if use_msa and not all(x == 'X' for x in sequence.get('sequence')) 
+                       else "empty")
             
-            sequences.append({
-                "protein": {
-                    "id": [chain_id],
-                    "sequence": sequence.get('sequence'),
-                    "msa": str(msa_path)
-                }
-            })
+            protein_dict = {
+                "id": [chain_id],
+                "sequence": sequence.get('sequence'),
+                "msa": str(msa_path)
+            }
+            
+            if modifications:
+                protein_dict["modifications"] = modifications
+                
+            sequences.append(protein_dict)
+          
     
     yaml_content = {
         "version": 1,
@@ -359,7 +366,8 @@ def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: b
     # Add constraints if provided
     if constraints:
         yaml_content["constraints"] = constraints
-    
+
+
     output_path = config.YAML_DIR / f"{pdb_code}.yaml"
     with open(output_path, 'w') as f:
         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
