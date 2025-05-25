@@ -340,23 +340,20 @@ def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: b
                     "sequence": sequence.get('sequence')
                 }
             })
-            
         else:
             msa_path = (config.MSA_DIR / f"{pdb_code}_{chain_id}_env/msa.npz" 
-                       if use_msa and not all(x == 'X' for x in sequence.get('sequence')) 
-                       else "empty")
+                       if use_msa and not all(x == 'X' for x in sequence.get('sequence')) else "empty")
             
             protein_dict = {
                 "id": [chain_id],
-                "sequence": sequence.get('sequence'),
+                "sequence": sequence.get('sequence'), 
                 "msa": str(msa_path)
             }
-            
             if modifications:
                 protein_dict["modifications"] = modifications
                 
-            sequences.append(protein_dict)
-          
+            sequences.append({"protein": protein_dict})
+                
     
     yaml_content = {
         "version": 1,
