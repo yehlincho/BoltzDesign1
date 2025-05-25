@@ -929,6 +929,14 @@ def boltz_hallucination(
             print('-'*100)
             batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration, soft = 0.0, e_soft=0.0, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
 
+    def _run_model(boltz_model, batch, predict_args):
+        return boltz_model(
+            batch,
+            recycling_steps=predict_args["recycling_steps"],
+            num_sampling_steps=predict_args["sampling_steps"],
+            multiplicity_diffusion_train=1,
+            diffusion_samples=predict_args["diffusion_samples"],
+            run_confidence_sequentially=True)
 
     def visualize_results(plots):
         # Plot distogram predictions
@@ -976,15 +984,7 @@ def boltz_hallucination(
         target = parse_boltz_schema(name, data, ccd_lib)
         best_batch = get_batch(target, msa_max_seqs, length)
         best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
-
-        output = boltz_model( 
-                best_batch,
-                recycling_steps = predict_args["recycling_steps"],
-                num_sampling_steps=predict_args["sampling_steps"],
-                multiplicity_diffusion_train=1,
-                diffusion_samples=predict_args["diffusion_samples"],
-                run_confidence_sequentially=True)
-
+        output = _run_model(boltz_model, best_batch, predict_args)
 
         rg_loss, rg = add_rg_loss(output['sample_atom_coords'], best_batch, length, binder_chain)
         return batch['res_type'].detach().cpu().numpy(), plots, loss_history, distogram_history, sequence_history 
@@ -1014,12 +1014,10 @@ def boltz_hallucination(
             i_logits = i_logits - torch.max(i_logits)
             i_X = i_logits- (torch.sum(torch.eye(i_logits.shape[-1])[[0,1,6,22,23,24,25,26,27,28,29,30,31,32]],dim=0)*(1e10)).to(device)
             i_aa = torch.multinomial(torch.softmax(i_X, dim=-1), 1).item()
-            print("position", i, "before mutation", mutated_sequence[i], "after mutation", alphabet[i_aa])
             mutated_sequence[i] = alphabet[i_aa]
         return ''.join(mutated_sequence)
 
     best_logits = best_batch['res_type_logits']
-
     best_seq = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
     data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
 
@@ -1027,69 +1025,61 @@ def boltz_hallucination(
     data_apo.pop('constraints', None)  # Remove constraints if they exist
     data_apo['sequences'] = [data_apo['sequences'][chain_to_number[binder_chain]]]  # Keep only chain B
 
-    target = parse_boltz_schema(name, data, ccd_lib)
-    target_apo = parse_boltz_schema(name, data_apo, ccd_lib)
-    best_batch = get_batch(target, msa_max_seqs, length)
-    best_batch_apo = get_batch(target_apo, msa_max_seqs, length)
-    best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
-    best_batch_apo = {key: value.unsqueeze(0).to(device) for key, value in best_batch_apo.items()}
-
-    output = boltz_model( 
-            best_batch,
-            recycling_steps = predict_args["recycling_steps"],
-            num_sampling_steps=predict_args["sampling_steps"],
-            multiplicity_diffusion_train=1,
-            diffusion_samples=predict_args["diffusion_samples"],
-            run_confidence_sequentially=True)
-
-   
-    output_apo = boltz_model( 
-            best_batch_apo,
-            recycling_steps = predict_args["recycling_steps"],
-            num_sampling_steps=predict_args["sampling_steps"],
-            multiplicity_diffusion_train=1,
-            diffusion_samples=predict_args["diffusion_samples"],
-            run_confidence_sequentially=True)
-
-    for _ in range(semi_greedy_steps):
-        plddt_loss = []
-        confidence_score=[]
-        mutated_sequence_ls=[]
-        for t in range(10): 
-            plddt = output['plddt'][best_batch['entity_id']==chain_to_number[binder_chain]]
-            i_prob = np.ones(length) if plddt is None else torch.maximum(1-plddt,torch.tensor(0))
-            i_prob = i_prob.detach().cpu().numpy() if torch.is_tensor(i_prob) else i_prob
-            sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
-            mutated_sequence  = _mutate(sequence, best_logits, i_prob)
-            data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = mutated_sequence
-            target = parse_boltz_schema(name, data, ccd_lib)
-            best_batch = get_batch(target, msa_max_seqs, length)
-            best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
-            output = boltz_model( 
-                    best_batch,
-                    recycling_steps = predict_args["recycling_steps"],
-                    num_sampling_steps=predict_args["sampling_steps"],
-                    multiplicity_diffusion_train=1,
-                    diffusion_samples=predict_args["diffusion_samples"],
-                    run_confidence_sequentially=True)
-                    
-            confidence  =output['complex_plddt'].detach().cpu().numpy()*0.8 + output['ligand_iptm'].detach().cpu().numpy()*0.2
-            plddt_loss.append(output['plddt'][best_batch['entity_id']==chain_to_number[binder_chain]].detach().cpu().numpy())
-            confidence_score.append(confidence)
-            mutated_sequence_ls.append(mutated_sequence)
-
-        best_id = np.argmax(confidence_score)
-        best_seq= mutated_sequence_ls[best_id]
-
-        data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
-        data_apo['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
-
+    def _update_batches(data, data_apo):
         target = parse_boltz_schema(name, data, ccd_lib)
         target_apo = parse_boltz_schema(name, data_apo, ccd_lib)
         best_batch = get_batch(target, msa_max_seqs, length)
         best_batch_apo = get_batch(target_apo, msa_max_seqs, length)
         best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
         best_batch_apo = {key: value.unsqueeze(0).to(device) for key, value in best_batch_apo.items()}
+        return best_batch, best_batch_apo
+
+    best_batch, best_batch_apo = _update_batches(data, data_apo)
+    output = _run_model(boltz_model, best_batch, predict_args)
+    output_apo = _run_model(boltz_model, best_batch_apo, predict_args)
+
+    prev_sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
+    prev_iptm = output['ligand_iptm'].detach().cpu().numpy()
+
+    for step in range(semi_greedy_steps):
+        confidence_score = []
+        mutated_sequence_ls = []
+        
+        for t in range(10):
+            plddt = output['plddt'][best_batch['entity_id']==chain_to_number[binder_chain]]
+            i_prob = np.ones(length) if plddt is None else torch.maximum(1-plddt,torch.tensor(0))
+            i_prob = i_prob.detach().cpu().numpy() if torch.is_tensor(i_prob) else i_prob
+            sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
+            mutated_sequence = _mutate(sequence, best_logits, i_prob)
+            data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = mutated_sequence
+            best_batch, _ = _update_batches(data, data_apo)
+            output = _run_model(boltz_model, best_batch, predict_args)
+            
+            iptm = output['ligand_iptm'].detach().cpu().numpy()
+            confidence_score.append(iptm)
+            mutated_sequence_ls.append(mutated_sequence)
+            print(f"Step {step}, Epoch {t}, iptm {iptm}")
+
+        best_id = np.argmax(confidence_score)
+        best_iptm = confidence_score[best_id]
+        
+        if best_iptm > prev_iptm:
+            best_seq = mutated_sequence_ls[best_id]
+            for seq_data in [data, data_apo]:
+                seq_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
+            print(f"Step {step}, Epoch {t}, Update sequence, iptm {best_iptm}, previous iptm {prev_iptm}")
+            print(f"Update sequence {best_seq}")
+            prev_iptm = best_iptm
+            prev_sequence = best_seq
+        else:
+            for seq_data in [data, data_apo]:
+                seq_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = prev_sequence
+
+        best_batch, best_batch_apo = _update_batches(data, data_apo)
+
+        if step == semi_greedy_steps - 1:
+            output = _run_model(boltz_model, best_batch, predict_args)
+            output_apo = _run_model(boltz_model, best_batch_apo, predict_args)
 
     return output, output_apo, best_batch, best_batch_apo, distogram_history, sequence_history, loss_history, con_loss_history, i_con_loss_history, plddt_loss_history
 
