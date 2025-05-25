@@ -231,146 +231,105 @@ def generate_custom_yaml(target_name: str, target_type: str, target: list, confi
         binder_id: Chain ID for the binder
     """
     return generate_yaml_for_taget_binder(target_name, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
-
-
+    
 def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
     """
-    Generate YAML content for a small molecule binder with multiple targets.
+    Generate YAML content for a small molecule binder with multiple targets and create the YAML file.
     
     Args:
-        type (str): Type of ligand ('small_molecule', 'dna', 'rna', 'metal')
+        name (str): Name/PDB code for the target
+        type (str): Type of ligand ('small_molecule', 'dna', 'rna', 'metal', 'protein')
         targets (list): List of target information (SMILES, sequences, or CCD codes)
         binder_id (str): ID of the binder
         config (Config): Configuration object
+        constraints (dict): Optional constraints to add to YAML
+        modifications (dict): Optional modifications to add to YAML
+        use_msa (bool): Whether to use MSA for proteins
         
     Returns:
-        dict: YAML content dictionary
+        tuple: YAML content dictionary and output path
     """
-    chain_dict = {}
-    chain_dict[binder_id] = {
-        'sequence': 'X' * 100,
+    # Build chain dictionary
+    chain_dict = {binder_id: {'sequence': 'X' * 100}}
+
+    # Map target types to their YAML representation
+    type_map = {
+        'protein': {'type': 'protein', 'sequence': True, 'msa': 'empty'},
+        'small_molecule': {'type': 'ligand', 'smiles': True},
+        'metal': {'type': 'ligand', 'ccd': True},
+        'dna': {'type': 'dna', 'sequence': True},
+        'rna': {'type': 'rna', 'sequence': True}
     }
 
-    # Add multiple ligands with sequential IDs
-
+    # Add targets with sequential IDs
+    yaml_target_ids = []
     for i, target in enumerate(targets):
         target_id = chr(ord('A') + i + 1)  # Start from B, C, D, etc.
-        if type == 'protein':
-            chain_dict[target_id] = {
-                'type': 'protein',
-                'id': target_id,
-                'sequence': target,
-                'msa': 'empty'
-            }
-        elif type == 'small_molecule':
-            chain_dict[target_id] = {
-                'type': 'ligand',
-                'id': target_id,
-                'smiles': target
-            }
-        elif type == 'dna':
-            chain_dict[target_id] = {
-                'type': 'dna',
-                'id': target_id,
-                'sequence': target
-            }
-        elif type == 'rna':
-            chain_dict[target_id] = {
-                'type': 'rna',
-                'id': target_id,
-                'sequence': target
-            }
-        elif type == 'metal':
-            chain_dict[target_id] = {
-                'type': 'metal',
-                'id': target_id,
-                'ccd': target
-            }
+        yaml_target_ids.append(target_id)
+        
+        target_info = {'id': target_id}
+        type_info = type_map[type]
+        
+        # Add appropriate fields based on target type
+        for field, value in type_info.items():
+            if value is True:
+                target_info[field] = target
+            elif value:
+                target_info[field] = value
+                
+        chain_dict[target_id] = target_info
 
-
-    return create_yaml_file(
-        pdb_code=name,
-        chain_dict=chain_dict,
-        config=config,
-        use_msa=use_msa,
-        constraints=constraints,
-        modifications=modifications
-    )
-
-def create_yaml_file(pdb_code: str, chain_dict: dict, config: Config, use_msa: bool = False, constraints: list = None, modifications: list = None) -> bool:
-    """Create YAML configuration file for protein chains, ligands, and nucleic acids.
-    
-    Args:
-        pdb_code: PDB identifier
-        chain_dict: Dictionary mapping chain IDs to sequences or sequence info dicts
-        config: Configuration object
-        msa_chains: List of chains that have MSA data
-        constraints: Optional list of constraints to add to the YAML
-        modifications: Optional list of modifications to add to the YAML
-    """
+    # Build sequences list for YAML
     sequences = []
-    for chain_id, sequence in chain_dict.items():
-        # Check if this is a ligand (SMILES string)
-        is_ligand = isinstance(sequence, dict) and sequence.get('type') == 'ligand'
-        
-        # Check if this is a metal (CCD code)
-        is_metal = isinstance(sequence, dict) and sequence.get('type') == 'metal'
-        
-        # Check if this is a nucleic acid sequence info dict
-        is_nucleic = isinstance(sequence, dict) and sequence.get('type') in ['dna', 'rna']
-    
-        if is_ligand:
-            sequences.append({
-                "ligand": {
-                    "id": [chain_id],
-                    "smiles": sequence.get('smiles')
-                }
-            })
-        elif is_metal:
-            sequences.append({
-                "ligand": {
-                    "id": [chain_id],
-                    "ccd": sequence.get('ccd')
-                }
-            })
-        elif is_nucleic:
-            sequences.append({
-                sequence.get('type'): {
-                    "id": [chain_id],
-                    "sequence": sequence.get('sequence')
-                }
-            })
-        else:
-            msa_path = (config.MSA_DIR / f"{pdb_code}_{chain_id}_env/msa.npz" 
-                       if use_msa and not all(x == 'X' for x in sequence.get('sequence')) else "empty")
+    for chain_id, info in chain_dict.items():
+        if not isinstance(info, dict) or 'type' not in info:
+            continue
             
-            protein_dict = {
-                "id": [chain_id],
-                "sequence": sequence.get('sequence'), 
-                "msa": str(msa_path)
+        entry = {}
+        if info['type'] == 'ligand':
+            key = 'smiles' if 'smiles' in info else 'ccd'
+            entry = {
+                "ligand": {
+                    "id": [chain_id],
+                    key: info[key]
+                }
             }
-            if modifications:
-                protein_dict["modifications"] = modifications
+        elif info['type'] in ['dna', 'rna']:
+            entry = {
+                info['type']: {
+                    "id": [chain_id],
+                    "sequence": info['sequence']
+                }
+            }
+        else:  # protein
+            msa_path = (config.MSA_DIR / f"{name}_{chain_id}_env/msa.npz" 
+                       if use_msa and not all(x == 'X' for x in info['sequence']) 
+                       else "empty")
+            
+            entry = {
+                "protein": {
+                    "id": [chain_id],
+                    "sequence": info['sequence'],
+                    "msa": str(msa_path)
+                }
+            }
+            
+            if modifications and chain_id in yaml_target_ids:
+                entry["protein"]["modifications"] = modifications
                 
-            sequences.append({"protein": protein_dict})
-                
+        sequences.append(entry)
     
-    yaml_content = {
-        "version": 1,
-        "sequences": sequences
-    }
-    
-    # Add constraints if provided
+    # Create and write YAML content
+    yaml_content = {"version": 1, "sequences": sequences}
     if constraints:
         yaml_content["constraints"] = constraints
 
-
-    output_path = config.YAML_DIR / f"{pdb_code}.yaml"
+    output_path = config.YAML_DIR / f"{name}.yaml"
     with open(output_path, 'w') as f:
         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
-    logger.info(f"Created YAML file for {pdb_code}")
+    logger.info(f"Created YAML file for {name}")
+    
     return yaml_content, output_path
-
 
     
 def process_msa(chain_id: str, sequence: str, pdb_code: str, config: Config) -> bool:
