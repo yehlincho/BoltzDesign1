@@ -301,6 +301,10 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
             msa_path = (config.MSA_DIR / f"{name}_{chain_id}_env/msa.npz" 
                        if use_msa and not all(x == 'X' for x in info['sequence']) 
                        else "empty")
+
+            if msa_path != "empty":
+                process_msa(chain_id, info['sequence'], name, config)
+                print(f"Processed MSA for {name} chain {chain_id}")
             
             entry = {
                 "protein": {
