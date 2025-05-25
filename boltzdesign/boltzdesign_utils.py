@@ -528,6 +528,8 @@ def boltz_hallucination(
     num_inter_contacts=2,
     num_intra_contacts=4,
     e_soft=0.8,
+    e_soft_1=0.8,
+    e_soft_2=1.0,
     alpha=2.0,
     pre_run=False,
     set_train=True,
@@ -888,7 +890,7 @@ def boltz_hallucination(
     else:
         if design_algorithm == "3stages":
             print('-'*100)
-            print("logits to softmax(T=1)")
+            print(f"logits to softmax(T={e_soft})")
             print('-'*100)
             batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration, e_soft=e_soft, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
             print('-'*100)
@@ -904,12 +906,15 @@ def boltz_hallucination(
             print('-'*100)
             batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=hard_iteration, soft=1.0, hard = 1.0,temp=0.01, num_optimizing_binder_pos=12, e_num_optimizing_binder_pos=16, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
 
-        elif design_algorithm == "3stages_early_stop":
+        elif design_algorithm == "3stages_extra":
             print('-'*100)
-            print("logits to softmax(T=1)")
+            print(f"logits to softmax(T={e_soft_1})")
             print('-'*100)
-            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration_1, e_soft=0.9, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
-            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration_2, e_soft=1.0, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
+            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration_1, e_soft=e_soft_1, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
+            print('-'*100)
+            print(f"logits to softmax(T={e_soft_2})")
+            print('-'*100)
+            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history = design(batch, iters=soft_iteration_2, e_soft=e_soft_2, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts)
             print('-'*100)
             print("softmax(T=1) to softmax(T=0.01)")
             print('-'*100)
@@ -1008,13 +1013,12 @@ def boltz_hallucination(
 
     def _mutate(sequence, best_logits, i_prob):
         mutated_sequence = list(sequence) # Create a copy of the input tensor
-        for m in range(1):
-            i = np.random.choice(np.arange(length),p=i_prob/i_prob.sum())
-            i_logits = best_logits[:, i]
-            i_logits = i_logits - torch.max(i_logits)
-            i_X = i_logits- (torch.sum(torch.eye(i_logits.shape[-1])[[0,1,6,22,23,24,25,26,27,28,29,30,31,32]],dim=0)*(1e10)).to(device)
-            i_aa = torch.multinomial(torch.softmax(i_X, dim=-1), 1).item()
-            mutated_sequence[i] = alphabet[i_aa]
+        i = np.random.choice(np.arange(length),p=i_prob/i_prob.sum())
+        i_logits = best_logits[:, i]
+        i_logits = i_logits - torch.max(i_logits)
+        i_X = i_logits- (torch.sum(torch.eye(i_logits.shape[-1])[[0,1,6,22,23,24,25,26,27,28,29,30,31,32]],dim=0)*(1e10)).to(device)
+        i_aa = torch.multinomial(torch.softmax(i_X, dim=-1), 1).item()
+        mutated_sequence[i] = alphabet[i_aa]
         return ''.join(mutated_sequence)
 
     best_logits = best_batch['res_type_logits']
@@ -1122,6 +1126,8 @@ def run_boltz_design(
             'num_inter_contacts': 2,
             'num_intra_contacts': 4,
             'e_soft': 0.8,
+            'e_soft_1': 0.8,
+            'e_soft_2': 1.0,
             'design_algorithm': '3stages',
             'set_train': True,
             'use_temp': True,
@@ -1204,6 +1210,8 @@ def run_boltz_design(
                         input_res_type=False,
                         loss_scales=loss_scales,
                         e_soft=config['e_soft'],
+                        e_soft_1=config['e_soft_1'],
+                        e_soft_2=config['e_soft_2'],
                         binder_chain=config['binder_chain'],
                         increasing_contact_over_itr=config['increasing_contact_over_itr'],
                         non_protein_target=config['non_protein_target'],
@@ -1240,6 +1248,8 @@ def run_boltz_design(
                         set_train=config['set_train'],
                         use_temp=config['use_temp'],
                         e_soft=config['e_soft'],
+                        e_soft_1=config['e_soft_1'],
+                        e_soft_2=config['e_soft_2'], 
                         distogram_only= config['distogram_only'],
                         input_res_type=input_res_type,
                         loss_scales=loss_scales,

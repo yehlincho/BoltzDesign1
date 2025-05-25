@@ -4,6 +4,8 @@ disconnect_feats: true
 disconnect_pairformer: false
 distogram_only: true
 e_soft: 0.8
+e_soft_1: 0.8
+e_soft_2: 1.0
 hard_iteration: 5
 helix_loss_max: -0.0
 helix_loss_min: -0.3
