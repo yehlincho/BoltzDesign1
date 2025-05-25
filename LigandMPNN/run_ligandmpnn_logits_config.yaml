@@ -1,9 +1,9 @@
 # Model configuration
 model_type: "protein_mpnn"  # Choose from: protein_mpnn, ligand_mpnn, per_residue_label_membrane_mpnn, global_label_membrane_mpnn, soluble_mpnn
-checkpoint_protein_mpnn: "${CMD}/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"
-checkpoint_ligand_mpnn: "${CMD}/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt"
-checkpoint_global_label_membrane_mpnn: "${CMD}/LigandMPNN/model_params/global_label_membrane_mpnn_v_48_020.pt"
-checkpoint_soluble_mpnn: "${CMD}/LigandMPNN/model_params/solublempnn_v_48_020.pt"
+checkpoint_protein_mpnn: "${CWD}/LigandMPNN/model_params/proteinmpnn_v_48_020.pt"
+checkpoint_ligand_mpnn: "${CWD}/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt"
+checkpoint_global_label_membrane_mpnn: "${CWD}/LigandMPNN/model_params/global_label_membrane_mpnn_v_48_020.pt"
+checkpoint_soluble_mpnn: "${CWD}/LigandMPNN/model_params/solublempnn_v_48_020.pt"
 
 # Input/Output configuration
 fasta_seq_separation: ":"

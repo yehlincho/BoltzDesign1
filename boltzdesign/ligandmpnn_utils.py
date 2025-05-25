@@ -242,10 +242,10 @@ def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=Fals
                                 print(f"iptm score: {iptm}")
                                 convert_cif_to_pdb(cif_path, pdb_path)
                         
-
                     else:
                         print(f"Converting {cif_path}")
                         convert_cif_to_pdb(cif_path, pdb_path)
+                        
             if confidence_scores:
                 confidence_scores_path = os.path.join(save_dir, 'high_iptm_confidence_scores.csv')
                 pd.DataFrame(confidence_scores).to_csv(confidence_scores_path, index=False)
@@ -348,11 +348,30 @@ def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=T
     
     return sorted(interface_indices)
 
-
-def run_ligandmpnn_redesign(base_dir, pdb_dir, ccd_path, boltz_model, yaml_dir, ligandmpnn_config, top_k=5, cutoff=6, non_protein_target=True, binder_chain='A', target_chains=['B'], fix_interface = True, num_workers='1'):
-    out_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_fa')
-    lmpnn_yaml_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_yaml')
-    results_final_dir = os.path.join(base_dir, 'boltz_predictions_success_lmpnn')
+def run_ligandmpnn_redesign(
+    base_dir,
+    pdb_dir,
+    ccd_path,
+    boltz_model,
+    yaml_dir,
+    ligandmpnn_config,
+    top_k=5,
+    cutoff=6,
+    non_protein_target=True,
+    binder_chain='A',
+    target_chains=['B'],
+    fix_interface=True,
+    out_dir=None,
+    lmpnn_yaml_dir=None,
+    results_final_dir=None
+):
+    # Set default output directories if not provided
+    if out_dir is None:
+        out_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_fa')
+    if lmpnn_yaml_dir is None:
+        lmpnn_yaml_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_yaml')
+    if results_final_dir is None:
+        results_final_dir = os.path.join(base_dir, 'boltz_predictions_success_lmpnn')
 
     # Create required directories
     for directory in [out_dir, lmpnn_yaml_dir, results_final_dir]:
@@ -430,27 +449,11 @@ def run_ligandmpnn_redesign(base_dir, pdb_dir, ccd_path, boltz_model, yaml_dir, 
                         if 'protein' in seq and 'msa' in seq['protein']:
                             msa_path = seq['protein']['msa']
                             if isinstance(msa_path, str) and msa_path.endswith('.npz'):
-                                seq['protein']['msa'] = msa_path[:-4] + '.a3m'
+                                seq['protein']['msa'] = msa_path.replace('.npz', '.a3m')
 
-                    print("yaml_data")
-                    print(yaml_data)
-                
                     final_yaml_path = os.path.join(lmpnn_yaml_dir, f'{pdb_name}_{idx+1}.yaml')
-                    print("final_yaml_path") 
-                    print(final_yaml_path)
                     with open(final_yaml_path, 'w') as f:
                         yaml.dump(yaml_data, f)
-
-                    import subprocess
-
-                    # subprocess.run(['boltz', 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir),  '--num_workers', num_workers, '--write_full_pae'])
-                    # subprocess.run([
-                    #     'boltz', 'predict',
-                    #     str(final_yaml_path),
-                    #     '--out_dir', str(results_final_dir),
-                    #     '--num_workers', '1',
-                    #     '--write_full_pae'  # just the flag, no int after
-                    # ])
 
                     predict(
                         data=str(final_yaml_path),

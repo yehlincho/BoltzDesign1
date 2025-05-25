@@ -49,8 +49,6 @@ import gc
 # if boltz_path is None:
 #     raise FileNotFoundError("The 'boltz' command was not found in the system PATH. Make sure it is installed and accessible.")
 
-
-
 def predict(
     data: str,
     out_dir: str,
@@ -508,7 +506,7 @@ def get_coords(batch, output):
     return coords
 
 
-def boltz_hallucination_4stages_dist_only_clearner(
+def boltz_hallucination(
     # Required arguments
     boltz_model,
     yaml_path,
@@ -809,7 +807,7 @@ def boltz_hallucination_4stages_dist_only_clearner(
                     'plddt_loss': 0.1,
                     'pae_loss': 0.4,
                     'i_pae_loss': 0.1,
-                    'rg_loss': 0.4,
+                    'rg_loss': 0.0,
                 }
 
             # Calculate total loss and print individual losses
@@ -881,7 +879,7 @@ def boltz_hallucination_4stages_dist_only_clearner(
                 optimizer.step()
                 optimizer.zero_grad()
                 current_lr = optimizer.param_groups[0]['lr']
-                print(f"Epoch {i}: lr: {current_lr:.2f}, soft: {opt['soft']:.2f}, hard: {opt['hard']:.2f}, temp: {opt['temp']:.2f}, total loss: {total_loss.item():.2f}, {loss_str}, Sequence difference from previous: {diff_percentage:.2f}%")
+                print(f"Epoch {i}: lr: {current_lr:.2f}, soft: {opt['soft']:.2f}, hard: {opt['hard']:.2f}, temp: {opt['temp']:.2f}, total loss: {total_loss.item():.2f}, {loss_str}")
         
         return batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history
 
@@ -916,7 +914,6 @@ def boltz_hallucination_4stages_dist_only_clearner(
             print("softmax(T=1) to softmax(T=0.01)")
             print('-'*100)
             print("set res_type_logits to logits")
-            # new_logits = (alpha * batch["res_type_logits"]).clone().detach().requires_grad_(True)
             new_logits = batch["res_type_logits"].clone().detach().requires_grad_(True)
             batch['res_type_logits'] = new_logits
             optimizer = torch.optim.SGD([batch['res_type_logits']], lr=learning_rate)
@@ -1186,58 +1183,52 @@ def run_boltz_design(
             try:
                 target_binder_input = yaml_path.stem
                 for itr in range(design_samples):
-                    while True:
-                    #     if 'BBF' in target_binder_input:
-                    #         config['msa_max_seqs'] = 2
-                    #     else:
-                    #         config['msa_max_seqs'] = 4096   
-                        config['length'] = random.randint(config['length_min'],config['length_max'])
-                        loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
-                        torch.cuda.empty_cache()
-                        output = None
-                        print('pre-run warm up')
-                        input_res_type, plots, loss_history, distogram_history, sequence_history = boltz_hallucination_4stages_dist_only_clearner(
-                            boltz_model,
-                            yaml_path,
-                            ccd_lib,
-                            length=config['length'],
-                            mutation_rate=config['mutation_rate'],
-                            pre_run=True,
-                            pre_iteration=config['pre_iteration'],
-                            soft_iteration=config['soft_iteration'],
-                            soft_iteration_1=config['soft_iteration_1'],
-                            soft_iteration_2=config['soft_iteration_2'],
-                            temp_iteration=config['temp_iteration'],
-                            hard_iteration=config['hard_iteration'],
-                            semi_greedy_steps=config['semi_greedy_steps'],
-                            inter_chain_cutoff=config['inter_chain_cutoff'],
-                            intra_chain_cutoff=config['intra_chain_cutoff'],
-                            num_inter_contacts=config['num_inter_contacts'],
-                            num_intra_contacts=config['num_intra_contacts'],
-                            learning_rate=config['learning_rate_pre'],
-                            disconnect_feats=config['disconnect_feats'],
-                            disconnect_pairformer=config['disconnect_pairformer'],
-                            set_train=config['set_train'],
-                            use_temp=config['use_temp'],
-                            distogram_only=True,
-                            input_res_type=False,
-                            loss_scales=loss_scales,
-                            e_soft=config['e_soft'],
-                            binder_chain=config['binder_chain'],
-                            increasing_contact_over_itr=config['increasing_contact_over_itr'],
-                            non_protein_target=config['non_protein_target'],
-                            mask_ligand=config['mask_ligand'],
-                            optimize_contact_per_binder_pos=config['optimize_contact_per_binder_pos'],
-                            pocket_condition=config['pocket_condition'],
-                            chain_to_number=chain_to_number,
-                            msa_max_seqs=config['msa_max_seqs'],
-                            optimizer_type=config['optimizer_type']
-                        )
-                        if input_res_type is not None:
-                            break
-
-                        print('warm up done')     
-                    output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history = boltz_hallucination_4stages_dist_only_clearner(
+                    config['length'] = random.randint(config['length_min'],config['length_max'])
+                    loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
+                    torch.cuda.empty_cache()
+                    output = None
+                    print('pre-run warm up')
+                    input_res_type, plots, loss_history, distogram_history, sequence_history = boltz_hallucination(
+                        boltz_model,
+                        yaml_path,
+                        ccd_lib,
+                        length=config['length'],
+                        mutation_rate=config['mutation_rate'],
+                        pre_run=True,
+                        pre_iteration=config['pre_iteration'],
+                        soft_iteration=config['soft_iteration'],
+                        soft_iteration_1=config['soft_iteration_1'],
+                        soft_iteration_2=config['soft_iteration_2'],
+                        temp_iteration=config['temp_iteration'],
+                        hard_iteration=config['hard_iteration'],
+                        semi_greedy_steps=config['semi_greedy_steps'],
+                        inter_chain_cutoff=config['inter_chain_cutoff'],
+                        intra_chain_cutoff=config['intra_chain_cutoff'],
+                        num_inter_contacts=config['num_inter_contacts'],
+                        num_intra_contacts=config['num_intra_contacts'],
+                        learning_rate=config['learning_rate_pre'],
+                        disconnect_feats=config['disconnect_feats'],
+                        disconnect_pairformer=config['disconnect_pairformer'],
+                        set_train=config['set_train'],
+                        use_temp=config['use_temp'],
+                        distogram_only=True,
+                        input_res_type=False,
+                        loss_scales=loss_scales,
+                        e_soft=config['e_soft'],
+                        binder_chain=config['binder_chain'],
+                        increasing_contact_over_itr=config['increasing_contact_over_itr'],
+                        non_protein_target=config['non_protein_target'],
+                        mask_ligand=config['mask_ligand'],
+                        optimize_contact_per_binder_pos=config['optimize_contact_per_binder_pos'],
+                        pocket_condition=config['pocket_condition'],
+                        chain_to_number=chain_to_number,
+                        msa_max_seqs=config['msa_max_seqs'],
+                        optimizer_type=config['optimizer_type']
+                    )
+                    if input_res_type is not None:
+                        break
+                    print('warm up done')     
+                    output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history = boltz_hallucination(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
@@ -1355,7 +1346,6 @@ def run_boltz_design(
                     boltz_model.predict_args['recycling_steps']=3
                     boltz_model.predict_args['sampling_steps']=200
                     boltz_model.predict_args['write_full_pae']=True
-
                     # subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
                     predict(
                         data=str(result_yaml),
@@ -1366,7 +1356,6 @@ def run_boltz_design(
                         num_workers = num_workers,
                         devices=1
                     )
-
                     del output, best_batch, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, output_cpu, best_batch_cpu, best_sequence, data
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -1376,13 +1365,11 @@ def run_boltz_design(
                     shutil.copy2(result_yaml, apo_yaml)
                     with open(apo_yaml, 'r') as f:
                         apo_data = yaml.safe_load(f)
-                    # Keep only the binder chain sequence
                     apo_data['sequences'] = [apo_data['sequences'][chain_to_number[config['binder_chain']]]]
                     apo_data.pop('constraints', None)
                     with open(apo_yaml, 'w') as f:
                         yaml.dump(apo_data, f)
                     # subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
-
                     predict(
                         data=str(apo_yaml),
                         ccd_path=Path(ccd_path),
@@ -1392,7 +1379,6 @@ def run_boltz_design(
                         num_workers = num_workers,
                         devices=1
                     )
-                    # Free memory after apo predict
                     del apo_data
                     gc.collect()
                     torch.cuda.empty_cache()
