@@ -220,6 +220,13 @@ def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, bind
         raise ValueError(f"Unsupported target type: {target_type}")
     return generate_yaml_for_taget_binder(pdb_code, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
 
+
+def generate_custom_yaml(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
+    """
+    Generate YAML content for a custom target binder with multiple targets and create the YAML file.
+    """
+    return generate_yaml_for_taget_binder(name, type, targets, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, use_msa=use_msa)
+
     
 def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, use_msa: bool = False) -> dict:
     """
