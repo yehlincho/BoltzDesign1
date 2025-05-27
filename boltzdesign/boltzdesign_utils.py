@@ -1430,20 +1430,6 @@ def run_boltz_design(
                     boltz_model.predict_args['sampling_steps']=200
                     boltz_model.predict_args['write_full_pae']=True
                     # subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
-                    predict(
-                        data=str(result_yaml),
-                        ccd_path=Path(ccd_path),
-                        out_dir=str(results_final_dir),
-                        model_module=boltz_model,
-                        accelerator="gpu",
-                        num_workers = num_workers,
-                        devices=1
-                    )
-                    del output, best_batch, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, output_cpu, best_batch_cpu, best_sequence, data
-                    gc.collect()
-                    torch.cuda.empty_cache()
-
-                    print(f"Completed processing {target_binder_input} iteration {itr + 1}")
                     # Handle apo structure - only keep the binder chain
                     shutil.copy2(result_yaml, apo_yaml)
                     with open(apo_yaml, 'r') as f:
@@ -1452,19 +1438,18 @@ def run_boltz_design(
                     apo_data.pop('constraints', None)
                     with open(apo_yaml, 'w') as f:
                         yaml.dump(apo_data, f)
-                    # subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
-                    predict(
-                        data=str(apo_yaml),
-                        ccd_path=Path(ccd_path),
-                        out_dir=str(apo_dir),
-                        model_module=boltz_model,
-                        accelerator="gpu",
+                    del apo_data, data, output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure
+                    for yaml_path in [result_yaml, apo_yaml]:
+                        predict(
+                            data=str(yaml_path),
+                            ccd_path=Path(ccd_path),
+                            out_dir=str(results_final_dir),
+                            model_module=boltz_model,
+                            accelerator="gpu",
                         num_workers = num_workers,
-                        devices=1
-                    )
-                    del apo_data
-                    gc.collect()
-                    torch.cuda.empty_cache()
+                        devices=1)
+                        gc.collect()
+                        torch.cuda.empty_cache()
 
             # except Exception as e:
             #     print(f"Error processing {target_binder_input} iteration {itr + 1}: {str(e)}")
