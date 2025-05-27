@@ -367,11 +367,11 @@ def run_ligandmpnn_redesign(
 ):
     # Set default output directories if not provided
     if out_dir is None:
-        out_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_fa')
+        out_dir = os.path.join(base_dir, 'lmpnn_redesigned_fa')
     if lmpnn_yaml_dir is None:
-        lmpnn_yaml_dir = os.path.join(base_dir, 'boltz_hallucination_success_lmpnn_yaml')
+        lmpnn_yaml_dir = os.path.join(base_dir, 'lmpnn_redesigned_yaml')
     if results_final_dir is None:
-        results_final_dir = os.path.join(base_dir, 'boltz_predictions_success_lmpnn')
+        results_final_dir = os.path.join(base_dir, 'lmpnn_redesigned')
 
     # Create required directories
     for directory in [out_dir, lmpnn_yaml_dir, results_final_dir]:

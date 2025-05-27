@@ -3,6 +3,7 @@
 JSON_DIR=$1
 OUTPUT_DIR=$2
 GPU_NUM=$3  # New argument for GPU number
+ALPHAFOLD_DIR=$4
 LOCK_DIR="$OUTPUT_DIR/locks"
 
 # Ensure the lock directory exists
@@ -37,12 +38,13 @@ for json_file in "$JSON_DIR"/*.json; do
   # Create a lock file to indicate this file is being processed
   touch "$lock_file"
 
-  sudo docker run -it \
-    --volume /home/jupyter-yehlin/alphafold3:/app/alphafold \
+  # sudo docker run -it \
+    sudo docker run \
+    --volume $ALPHAFOLD_DIR:/app/alphafold \
     --volume $JSON_DIR:/root/af_input \
     --volume $OUTPUT_DIR:/root/af_output \
-    --volume /home/jupyter-yehlin/alphafold3/models:/root/models \
-    --volume /home/jupyter-yehlin/alphafold3/alphafold3_data_save:/root/public_databases \
+    --volume $ALPHAFOLD_DIR/models:/root/models \
+    --volume $ALPHAFOLD_DIR/alphafold3_data_save:/root/public_databases \
     --gpus device=$GPU_NUM \
     alphafold3_yc \
     python /app/alphafold/run_alphafold.py \

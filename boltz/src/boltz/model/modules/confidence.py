@@ -315,8 +315,7 @@ class ConfidenceModule(nn.Module):
             z = z_t
 
         out_dict = {}
-        out_dict["sdistogram"] = distogram_
-        out_dict["z_from_confidence_pairformer"] = z_
+
         # confidence heads
         out_dict.update(
             self.confidence_heads(

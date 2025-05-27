@@ -310,7 +310,7 @@ class Boltz1(LightningModule):
 
         return dict_out, s, z, s_inputs
 
-    def design_pairformer_confidence(
+    def get_distogram_confidence(
         self,
         feats: dict[str, Tensor],
         recycling_steps: int = 0,
