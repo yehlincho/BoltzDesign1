@@ -162,14 +162,11 @@ def predict(
         return_predictions=False,
     )
 
-    finally:
-        # Aggressive cleanup
-        del trainer
-        del model_module
-        del data_module
-        del processed
-        gc.collect()
-        torch.cuda.empty_cache()
+    del trainer
+    del model_module
+    del data_module
+    del processed
+
 
 tokens = [
     "<pad>",
