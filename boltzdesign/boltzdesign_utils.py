@@ -52,29 +52,24 @@ from scipy.special import expit as sigmoid
 import logging
 logging.basicConfig(level=logging.WARNING)
 
-# def save_output(predictions, batch, data_dir, output_dir, output_format='mmcif'):
-#     writer = BoltzWriter(
-#         data_dir=data_dir,
-#         output_dir=output_dir,
-#         output_format=output_format,
-#     )
-
-#     predictions['exception'] = False
-#     batch_idx = 0
-#     batch_indices = [0]
-#     dataloader_idx = 0
-#     trainer = None
-#     pl_module = None
+def clear_model_cache(model):
+    """Comprehensive model cache clearing"""
+    if hasattr(model, 'trainer') and model.trainer is not None:
+        # Clear trainer state
+        model.trainer = None
     
-#     writer.write_on_batch_end(
-#         trainer=trainer,
-#         pl_module=pl_module,
-#         prediction=predictions,
-#         batch_indices=batch_indices,
-#         batch=batch,
-#         batch_idx=batch_idx,
-#         dataloader_idx=dataloader_idx,
-#     )
+    # Clear any cached computations
+    if hasattr(model, '_cached_forward'):
+        model._cached_forward = None
+    
+    # Reset model to eval mode
+    model.eval()
+    
+    # Clear gradients (though they should be disabled)
+    for param in model.parameters():
+        if param.grad is not None:
+            param.grad = None
+
 
 def predict(
     data: str,
@@ -1230,13 +1225,10 @@ def run_boltz_design(
     
     results_final_dir = os.path.join(version_dir, 'results_final')
     results_yaml_dir = os.path.join(version_dir, 'results_yaml')
-    apo_dir = os.path.join(version_dir, 'results_apo_final')
-    apo_yaml_dir = os.path.join(version_dir, 'results_apo_yaml')
     loss_dir = os.path.join(version_dir, 'loss')
     animation_save_dir = os.path.join(version_dir, 'animation')
 
-    for directory in [results_yaml_dir, results_final_dir, apo_yaml_dir, 
-                     apo_dir, loss_dir, animation_save_dir]:
+    for directory in [results_yaml_dir, results_final_dir, loss_dir, animation_save_dir]:
         os.makedirs(directory, exist_ok=True)
 
     # Save config
@@ -1432,12 +1424,11 @@ def run_boltz_design(
                     with open(rmsd_csv_path, 'a', newline='') as f:
                         writer = csv.writer(f)
                         if not csv_exists:
-                            writer.writerow(['target', 'length', 'iteration', 'rmsd', 'complex_plddt', 'ligand_iptm', 'iptm', 'helix_loss'])
+                            writer.writerow(['target', 'length', 'iteration', 'apo_holo_rmsd', 'holo_complex_plddt', 'holo_iptm', 'apo_complex_plddt', 'apo_iptm', 'helix_loss'])
                             csv_exists = True
-                        writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['ligand_iptm'].item(), output['iptm'].item(), loss_scales['helix_loss']])
+                        writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['iptm'].item(), output_apo['complex_plddt'].item(), output_apo['iptm'].item(), loss_scales['helix_loss']])
 
                     result_yaml = os.path.join(results_yaml_dir, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
-                    apo_yaml = os.path.join(apo_yaml_dir, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
                     output_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in output.items()}
                     best_batch_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in best_batch.items()}
                     best_sequence = ''.join([alphabet[i] for i in np.argmax(best_batch_cpu['res_type'][best_batch_cpu['entity_id']==chain_to_number[config['binder_chain']],:], axis=-1)])
@@ -1462,7 +1453,7 @@ def run_boltz_design(
                     boltz_model.predict_args['recycling_steps']=3
                     boltz_model.predict_args['sampling_steps']=200
                     boltz_model.predict_args['write_full_pae']=True
-                    # subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                    
                     predict(
                         data=str(result_yaml),
                         ccd_path=Path(ccd_path),
@@ -1472,42 +1463,9 @@ def run_boltz_design(
                         num_workers = num_workers,
                         devices=1
                     )
-                    
+                    clear_model_cache(boltz_model)
                     gc.collect()
                     torch.cuda.empty_cache()
-
-                    print(f"Completed processing {target_binder_input} iteration {itr + 1}")
-                    # Handle apo structure - only keep the binder chain
-                    shutil.copy2(result_yaml, apo_yaml)
-                    with open(apo_yaml, 'r') as f:
-                        apo_data = yaml.safe_load(f)
-                    apo_data['sequences'] = [apo_data['sequences'][chain_to_number[config['binder_chain']]]]
-                    apo_data.pop('constraints', None)
-                    with open(apo_yaml, 'w') as f:
-                        yaml.dump(apo_data, f)
-                    # subprocess.run([boltz_path, 'predict', str(apo_yaml), '--out_dir', str(apo_dir), '--write_full_pae'])
-                    predict(
-                        data=str(apo_yaml),
-                        ccd_path=Path(ccd_path),
-                        out_dir=str(apo_dir),
-                        model_module=boltz_model,
-                        accelerator="gpu",
-                        num_workers = num_workers,
-                        devices=1
-                    )
-                    del apo_data
-
-                    # save_output(output, best_batch, result_yaml, results_final_dir, output_format='mmcif')
-                    # save_output(output_apo, best_batch_apo, apo_yaml, apo_dir, output_format='mmcif')
-
-                    gc.collect()
-                    torch.cuda.empty_cache()
-
-
-
-
-
-
 
             # except Exception as e:
             #     print(f"Error processing {target_binder_input} iteration {itr + 1}: {str(e)}")
