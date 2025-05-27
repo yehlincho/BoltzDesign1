@@ -52,6 +52,30 @@ from scipy.special import expit as sigmoid
 import logging
 logging.basicConfig(level=logging.WARNING)
 
+# def save_output(predictions, batch, data_dir, output_dir, output_format='mmcif'):
+#     writer = BoltzWriter(
+#         data_dir=data_dir,
+#         output_dir=output_dir,
+#         output_format=output_format,
+#     )
+
+#     predictions['exception'] = False
+#     batch_idx = 0
+#     batch_indices = [0]
+#     dataloader_idx = 0
+#     trainer = None
+#     pl_module = None
+    
+#     writer.write_on_batch_end(
+#         trainer=trainer,
+#         pl_module=pl_module,
+#         prediction=predictions,
+#         batch_indices=batch_indices,
+#         batch=batch,
+#         batch_idx=batch_idx,
+#         dataloader_idx=dataloader_idx,
+#     )
+
 def predict(
     data: str,
     out_dir: str,
@@ -592,7 +616,7 @@ def boltz_hallucination(
     boltz_model.train() if set_train else boltz_model.eval()
     print(f"set in {'train' if set_train else 'eval'} mode")
 
-    def get_batch(target, max_seqs=0, length=100, pocket_condition=False):
+    def get_batch(target, max_seqs=0, length=100, pocket_condition=False, keep_record=False):
         target_id = target.record.id
         structure = target.structure
 
@@ -647,6 +671,10 @@ def boltz_hallucination(
                         inference_binder=None,
                         inference_pocket=None,
                     )
+
+        if keep_record:
+            batch['record'] = target.record
+
         return batch, structure
     
     batch, structure = get_batch(target, max_seqs=msa_max_seqs, length=length, pocket_condition=pocket_condition)
@@ -1075,10 +1103,10 @@ def boltz_hallucination(
     def _update_batches(data, data_apo):
         target = parse_boltz_schema(name, data, ccd_lib)
         target_apo = parse_boltz_schema(name, data_apo, ccd_lib)
-        best_batch, _ = get_batch(target, msa_max_seqs, length)
-        best_batch_apo, _ = get_batch(target_apo, msa_max_seqs, length)
-        best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
-        best_batch_apo = {key: value.unsqueeze(0).to(device) for key, value in best_batch_apo.items()}
+        best_batch, _ = get_batch(target, msa_max_seqs, length, keep_record=True)
+        best_batch_apo, _ = get_batch(target_apo, msa_max_seqs, length, keep_record=True)
+        best_batch = {key: value.unsqueeze(0).to(device) if key != 'record' else value for key, value in best_batch.items()}
+        best_batch_apo = {key: value.unsqueeze(0).to(device) if key != 'record' else value for key, value in best_batch_apo.items()}
         return best_batch, best_batch_apo
 
     best_batch, best_batch_apo = _update_batches(data, data_apo)
@@ -1468,8 +1496,18 @@ def run_boltz_design(
                         devices=1
                     )
                     del apo_data
+
+                    # save_output(output, best_batch, result_yaml, results_final_dir, output_format='mmcif')
+                    # save_output(output_apo, best_batch_apo, apo_yaml, apo_dir, output_format='mmcif')
+
                     gc.collect()
                     torch.cuda.empty_cache()
+
+
+
+
+
+
 
             # except Exception as e:
             #     print(f"Error processing {target_binder_input} iteration {itr + 1}: {str(e)}")
