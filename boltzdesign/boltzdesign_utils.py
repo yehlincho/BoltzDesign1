@@ -52,25 +52,6 @@ from scipy.special import expit as sigmoid
 import logging
 logging.basicConfig(level=logging.WARNING)
 
-def clear_model_cache(model):
-    """Comprehensive model cache clearing"""
-    if hasattr(model, 'trainer') and model.trainer is not None:
-        # Clear trainer state
-        model.trainer = None
-    
-    # Clear any cached computations
-    if hasattr(model, '_cached_forward'):
-        model._cached_forward = None
-    
-    # Reset model to eval mode
-    model.eval()
-    
-    # Clear gradients (though they should be disabled)
-    for param in model.parameters():
-        if param.grad is not None:
-            param.grad = None
-
-
 def predict(
     data: str,
     out_dir: str,
@@ -108,19 +89,12 @@ def predict(
     out_dir = out_dir / f"boltz_results_{data.stem}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # # Ensure required files are available
-    # from boltz.utils.download import download
-    # download(cache)
-
     from boltz.main import check_inputs
     data = check_inputs(data, out_dir, override)
     if not data:
         click.echo("No predictions to run, exiting.")
         return
 
-    print
-
-    # Distributed strategy
     strategy = "auto"
     if (isinstance(devices, int) and devices > 1) or (isinstance(devices, list) and len(devices) > 1):
         strategy = DDPStrategy()
@@ -129,7 +103,6 @@ def predict(
 
     click.echo(f"Running predictions for {len(data)} structure{'s' if len(data) > 1 else ''}")
 
-    # Input preprocessing
     from boltz.main import process_inputs
     process_inputs(
         data=data,
@@ -140,7 +113,6 @@ def predict(
         msa_pairing_strategy=msa_pairing_strategy,
     )
 
-    # Load processed inputs
     from boltz.main import Manifest, BoltzProcessedInput
     processed_dir = out_dir / "processed"
     processed = BoltzProcessedInput(
@@ -148,7 +120,6 @@ def predict(
         targets_dir=processed_dir / "structures",
         msa_dir=processed_dir / "msa",
     )
-
     from boltz.main import BoltzInferenceDataModule
     data_module = BoltzInferenceDataModule(
         manifest=processed.manifest,
@@ -157,7 +128,6 @@ def predict(
         num_workers=num_workers,
     )
 
-    # Create writer and trainer
     from boltz.main import BoltzWriter
     pred_writer = BoltzWriter(
         data_dir=processed.targets_dir,
@@ -174,17 +144,11 @@ def predict(
         precision=32,
     )
 
-    # Run inference
     trainer.predict(
         model_module,
         datamodule=data_module,
         return_predictions=False,
     )
-
-    del trainer
-    del model_module
-    del data_module
-    del processed
 
 
 tokens = [
@@ -563,7 +527,8 @@ def boltz_hallucination(
     temp_iteration=50,
     hard_iteration=10,
     semi_greedy_steps=0,
-    learning_rate=1.0,
+    learning_rate=0.1,
+    learning_rate_pre=0.1,
     mutation_rate=1,
     inter_chain_cutoff=21.0,
     intra_chain_cutoff=14.0,
@@ -585,7 +550,7 @@ def boltz_hallucination(
     increasing_contact_over_itr=False,
     loss_scales=None,
     optimize_contact_per_binder_pos=False,
-    pocket_condition=False,
+    pocket_conditioning=False,
     chain_to_number=None,
     msa_max_seqs=4096,
     optimizer_type='SGD',
@@ -611,7 +576,7 @@ def boltz_hallucination(
     boltz_model.train() if set_train else boltz_model.eval()
     print(f"set in {'train' if set_train else 'eval'} mode")
 
-    def get_batch(target, max_seqs=0, length=100, pocket_condition=False, keep_record=False):
+    def get_batch(target, max_seqs=0, length=100, pocket_conditioning=False, keep_record=False):
         target_id = target.record.id
         structure = target.structure
 
@@ -638,7 +603,7 @@ def boltz_hallucination(
         tokenized = tokenizer.tokenize(input)
         featurizer = BoltzFeaturizer()
 
-        if pocket_condition:
+        if pocket_conditioning:
             options = target.record.inference_options
             binders, pocket = options.binders, options.pocket  
             batch = featurizer.process(
@@ -672,7 +637,7 @@ def boltz_hallucination(
 
         return batch, structure
     
-    batch, structure = get_batch(target, max_seqs=msa_max_seqs, length=length, pocket_condition=pocket_condition)
+    batch, structure = get_batch(target, max_seqs=msa_max_seqs, length=length, pocket_conditioning=pocket_conditioning)
     batch = {key: value.unsqueeze(0).to(device) for key, value in batch.items()}
     
     ## initialize res_type_logits
@@ -694,8 +659,7 @@ def boltz_hallucination(
         batch['res_type'] = batch['res_type'].float()
 
     batch['res_type_logits'].requires_grad = True
-    optimizer = torch.optim.AdamW([batch['res_type_logits']], lr=learning_rate) if optimizer_type == 'AdamW' else torch.optim.SGD([batch['res_type_logits']], lr=learning_rate)
-    num_pos = batch['res_type'].shape[1] - length
+    optimizer = torch.optim.AdamW([batch['res_type_logits']], lr=learning_rate_pre if pre_run else learning_rate) if optimizer_type == 'AdamW' else torch.optim.SGD([batch['res_type_logits']], lr=learning_rate_pre if pre_run else learning_rate)
 
     def norm_seq_grad(grad, chain_mask):
         chain_mask = chain_mask.bool()
@@ -1155,7 +1119,6 @@ def boltz_hallucination(
     return output, output_apo, best_batch, best_batch_apo, distogram_history, sequence_history, loss_history, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list, traj_plddt_list, structure
 
 
-
 def run_boltz_design(
     main_dir,
     yaml_dir,
@@ -1208,7 +1171,7 @@ def run_boltz_design(
             'increasing_contact_over_itr': False,
             'mask_ligand': False,
             'optimize_contact_per_binder_pos':False,
-            'pocket_condition': False,
+            'pocket_conditioning': False,
             'msa_max_seqs':4096,
             'length_min': 95,
             'length_max': 160,
@@ -1239,7 +1202,8 @@ def run_boltz_design(
     alphabet = list('XXARNDCQEGHILKMFPSTWYV-')
     rmsd_csv_path = os.path.join(results_final_dir, 'rmsd_results.csv')
     csv_exists = os.path.exists(rmsd_csv_path)
-
+    filtered_config = {k: v for k, v in config.items() 
+                if k not in ['helix_loss_min', 'helix_loss_max', 'length_min', 'length_max']}
     for yaml_path in Path(yaml_dir).glob('*.yaml'):
         if yaml_path.name.endswith('.yaml'):
             # try:
@@ -1247,91 +1211,32 @@ def run_boltz_design(
                 for itr in range(design_samples):
                     config['length'] = random.randint(config['length_min'],config['length_max'])
                     loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
-                    torch.cuda.empty_cache()
+
                     print('pre-run warm up')
                     input_res_type, plots, loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list = boltz_hallucination(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
-                        length=config['length'],
-                        mutation_rate=config['mutation_rate'],
+                        **filtered_config,
                         pre_run=True,
-                        pre_iteration=config['pre_iteration'],
-                        soft_iteration=config['soft_iteration'],
-                        soft_iteration_1=config['soft_iteration_1'],
-                        soft_iteration_2=config['soft_iteration_2'],
-                        temp_iteration=config['temp_iteration'],
-                        hard_iteration=config['hard_iteration'],
-                        semi_greedy_steps=config['semi_greedy_steps'],
-                        inter_chain_cutoff=config['inter_chain_cutoff'],
-                        intra_chain_cutoff=config['intra_chain_cutoff'],
-                        num_inter_contacts=config['num_inter_contacts'],
-                        num_intra_contacts=config['num_intra_contacts'],
-                        learning_rate=config['learning_rate_pre'],
-                        disconnect_feats=config['disconnect_feats'],
-                        disconnect_pairformer=config['disconnect_pairformer'],
-                        set_train=config['set_train'],
-                        use_temp=config['use_temp'],
-                        distogram_only=True,
                         input_res_type=False,
                         loss_scales=loss_scales,
-                        e_soft=config['e_soft'],
-                        e_soft_1=config['e_soft_1'],
-                        e_soft_2=config['e_soft_2'],
-                        binder_chain=config['binder_chain'],
-                        increasing_contact_over_itr=config['increasing_contact_over_itr'],
-                        non_protein_target=config['non_protein_target'],
-                        mask_ligand=config['mask_ligand'],
-                        optimize_contact_per_binder_pos=config['optimize_contact_per_binder_pos'],
-                        pocket_condition=config['pocket_condition'],
                         chain_to_number=chain_to_number,
-                        msa_max_seqs=config['msa_max_seqs'],
-                        optimizer_type=config['optimizer_type'],
                         save_trajectory=save_trajectory
                     )
                     print('warm up done')     
+                    
                     output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure = boltz_hallucination(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
-                        length=config['length'],
-                        mutation_rate=config['mutation_rate'],
+                        **filtered_config,
                         pre_run=False,
-                        design_algorithm=config['design_algorithm'],
-                        pre_iteration=config['pre_iteration'],    
-                        soft_iteration=config['soft_iteration'],
-                        soft_iteration_1=config['soft_iteration_1'],
-                        soft_iteration_2=config['soft_iteration_2'],
-                        temp_iteration=config['temp_iteration'],
-                        hard_iteration=config['hard_iteration'],
-                        semi_greedy_steps=config['semi_greedy_steps'],
-                        learning_rate=config['learning_rate'],
-                        inter_chain_cutoff=config['inter_chain_cutoff'],
-                        intra_chain_cutoff=config['intra_chain_cutoff'],
-                        num_inter_contacts=config['num_inter_contacts'],
-                        num_intra_contacts=config['num_intra_contacts'],
-                        disconnect_feats=config['disconnect_feats'],
-                        disconnect_pairformer=config['disconnect_pairformer'],
-                        set_train=config['set_train'],
-                        use_temp=config['use_temp'],
-                        e_soft=config['e_soft'],
-                        e_soft_1=config['e_soft_1'],
-                        e_soft_2=config['e_soft_2'], 
-                        distogram_only= config['distogram_only'],
                         input_res_type=input_res_type,
                         loss_scales=loss_scales,
-                        binder_chain=config['binder_chain'],
-                        increasing_contact_over_itr=config['increasing_contact_over_itr'],
-                        non_protein_target=config['non_protein_target'],
-                        mask_ligand=config['mask_ligand'],
-                        optimize_contact_per_binder_pos=config['optimize_contact_per_binder_pos'],
-                        pocket_condition=config['pocket_condition'],
                         chain_to_number=chain_to_number,
-                        msa_max_seqs=config['msa_max_seqs'],
-                        optimizer_type=config['optimizer_type'],
                         save_trajectory=save_trajectory
                     )
-
                     loss_history.extend(loss_history_2)
                     distogram_history.extend(distogram_history_2) 
                     sequence_history.extend(sequence_history_2)
@@ -1424,9 +1329,9 @@ def run_boltz_design(
                     with open(rmsd_csv_path, 'a', newline='') as f:
                         writer = csv.writer(f)
                         if not csv_exists:
-                            writer.writerow(['target', 'length', 'iteration', 'apo_holo_rmsd', 'holo_complex_plddt', 'holo_iptm', 'apo_complex_plddt', 'apo_iptm', 'helix_loss'])
+                            writer.writerow(['target', 'length', 'iteration', 'apo_holo_rmsd', 'complex_plddt', 'iptm',  'helix_loss'])
                             csv_exists = True
-                        writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['iptm'].item(), output_apo['complex_plddt'].item(), output_apo['iptm'].item(), loss_scales['helix_loss']])
+                        writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['iptm'].item(), loss_scales['helix_loss']])
 
                     result_yaml = os.path.join(results_yaml_dir, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
                     output_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in output.items()}
@@ -1463,7 +1368,7 @@ def run_boltz_design(
                         num_workers = num_workers,
                         devices=1
                     )
-                    clear_model_cache(boltz_model)
+
                     gc.collect()
                     torch.cuda.empty_cache()
 

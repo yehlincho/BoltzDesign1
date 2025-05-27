@@ -24,7 +24,7 @@ num_inter_contacts: 2
 num_intra_contacts: 4
 optimize_contact_per_binder_pos: true
 optimizer_type: SGD
-pocket_condition: true
+pocket_conditioning: true
 pre_iteration: 30
 semi_greedy_steps: 0
 set_train: true
