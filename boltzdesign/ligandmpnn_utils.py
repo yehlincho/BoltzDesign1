@@ -35,7 +35,7 @@ from boltz.data.feature import featurizer
 from boltz.data.tokenize.boltz import BoltzTokenizer, TokenData
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.parse.schema import parse_boltz_schema
-from boltzdesign_utils import predict
+# from boltzdesign_utils import predict
 
 from matplotlib.animation import FuncAnimation
 import numpy as np
@@ -352,7 +352,7 @@ def run_ligandmpnn_redesign(
     base_dir,
     pdb_dir,
     ccd_path,
-    boltz_model,
+    boltz_path,
     yaml_dir,
     ligandmpnn_config,
     top_k=5,
@@ -455,14 +455,17 @@ def run_ligandmpnn_redesign(
                     with open(final_yaml_path, 'w') as f:
                         yaml.dump(yaml_data, f)
 
-                    predict(
-                        data=str(final_yaml_path),
-                        ccd_path=Path(ccd_path),
-                        out_dir=str(results_final_dir),
-                        model_module=boltz_model,
-                        accelerator="gpu",
-                        num_workers = 1
-                    )
+                    # predict(
+                    #     data=str(final_yaml_path),
+                    #     ccd_path=Path(ccd_path),
+                    #     out_dir=str(results_final_dir),
+                    #     model_module=boltz_model,
+                    #     accelerator="gpu",
+                    #     num_workers = 1
+                    # )
+
+                    import subprocess
+                    subprocess.run([boltz_path, 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])
                     print(f"Completed processing {pdb_name} for sequence {idx+1}")
 
 

@@ -52,103 +52,103 @@ from scipy.special import expit as sigmoid
 import logging
 logging.basicConfig(level=logging.WARNING)
 
-def predict(
-    data: str,
-    out_dir: str,
-    ccd_path: str,
-    model_module,  # Already loaded Boltz1 model
-    cache: str = "~/.boltz",
-    devices: int = 1,
-    accelerator: str = "gpu",
-    output_format: Literal["pdb", "mmcif"] = "mmcif",
-    num_workers: int = 2,
-    override: bool = False,
-    seed: Optional[int] = None,
-    use_msa_server: bool = False,
-    msa_server_url: str = "https://api.colabfold.com",
-    msa_pairing_strategy: str = "greedy",
-) -> None:
-    """Run predictions with a preloaded Boltz1 model."""
+# def predict(
+#     data: str,
+#     out_dir: str,
+#     ccd_path: str,
+#     model_module,  # Already loaded Boltz1 model
+#     cache: str = "~/.boltz",
+#     devices: int = 1,
+#     accelerator: str = "gpu",
+#     output_format: Literal["pdb", "mmcif"] = "mmcif",
+#     num_workers: int = 2,
+#     override: bool = False,
+#     seed: Optional[int] = None,
+#     use_msa_server: bool = False,
+#     msa_server_url: str = "https://api.colabfold.com",
+#     msa_pairing_strategy: str = "greedy",
+# ) -> None:
+#     """Run predictions with a preloaded Boltz1 model."""
 
-    if accelerator == "cpu":
-        click.echo("Running on CPU, this will be slow. Consider using a GPU.")
+#     if accelerator == "cpu":
+#         click.echo("Running on CPU, this will be slow. Consider using a GPU.")
 
-    torch.set_grad_enabled(False)
-    torch.set_float32_matmul_precision("highest")
+#     torch.set_grad_enabled(False)
+#     torch.set_float32_matmul_precision("highest")
 
-    if seed is not None:
-        from pytorch_lightning.utilities.seed import seed_everything
-        seed_everything(seed)
+#     if seed is not None:
+#         from pytorch_lightning.utilities.seed import seed_everything
+#         seed_everything(seed)
 
-    # Prepare paths
-    cache = Path(cache).expanduser()
-    cache.mkdir(parents=True, exist_ok=True)
+#     # Prepare paths
+#     cache = Path(cache).expanduser()
+#     cache.mkdir(parents=True, exist_ok=True)
 
-    data = Path(data).expanduser()
-    out_dir = Path(out_dir).expanduser()
-    out_dir = out_dir / f"boltz_results_{data.stem}"
-    out_dir.mkdir(parents=True, exist_ok=True)
+#     data = Path(data).expanduser()
+#     out_dir = Path(out_dir).expanduser()
+#     out_dir = out_dir / f"boltz_results_{data.stem}"
+#     out_dir.mkdir(parents=True, exist_ok=True)
 
-    from boltz.main import check_inputs
-    data = check_inputs(data, out_dir, override)
-    if not data:
-        click.echo("No predictions to run, exiting.")
-        return
+#     from boltz.main import check_inputs
+#     data = check_inputs(data, out_dir, override)
+#     if not data:
+#         click.echo("No predictions to run, exiting.")
+#         return
 
-    strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (isinstance(devices, list) and len(devices) > 1):
-        strategy = DDPStrategy()
-        if len(data) < devices:
-            raise ValueError("Number of requested devices is greater than the number of predictions.")
+#     strategy = "auto"
+#     if (isinstance(devices, int) and devices > 1) or (isinstance(devices, list) and len(devices) > 1):
+#         strategy = DDPStrategy()
+#         if len(data) < devices:
+#             raise ValueError("Number of requested devices is greater than the number of predictions.")
 
-    click.echo(f"Running predictions for {len(data)} structure{'s' if len(data) > 1 else ''}")
+#     click.echo(f"Running predictions for {len(data)} structure{'s' if len(data) > 1 else ''}")
 
-    from boltz.main import process_inputs
-    process_inputs(
-        data=data,
-        out_dir=out_dir,
-        ccd_path=ccd_path,
-        use_msa_server=use_msa_server,
-        msa_server_url=msa_server_url,
-        msa_pairing_strategy=msa_pairing_strategy,
-    )
+#     from boltz.main import process_inputs
+#     process_inputs(
+#         data=data,
+#         out_dir=out_dir,
+#         ccd_path=ccd_path,
+#         use_msa_server=use_msa_server,
+#         msa_server_url=msa_server_url,
+#         msa_pairing_strategy=msa_pairing_strategy,
+#     )
 
-    from boltz.main import Manifest, BoltzProcessedInput
-    processed_dir = out_dir / "processed"
-    processed = BoltzProcessedInput(
-        manifest=Manifest.load(processed_dir / "manifest.json"),
-        targets_dir=processed_dir / "structures",
-        msa_dir=processed_dir / "msa",
-    )
-    from boltz.main import BoltzInferenceDataModule
-    data_module = BoltzInferenceDataModule(
-        manifest=processed.manifest,
-        target_dir=processed.targets_dir,
-        msa_dir=processed.msa_dir,
-        num_workers=num_workers,
-    )
+#     from boltz.main import Manifest, BoltzProcessedInput
+#     processed_dir = out_dir / "processed"
+#     processed = BoltzProcessedInput(
+#         manifest=Manifest.load(processed_dir / "manifest.json"),
+#         targets_dir=processed_dir / "structures",
+#         msa_dir=processed_dir / "msa",
+#     )
+#     from boltz.main import BoltzInferenceDataModule
+#     data_module = BoltzInferenceDataModule(
+#         manifest=processed.manifest,
+#         target_dir=processed.targets_dir,
+#         msa_dir=processed.msa_dir,
+#         num_workers=num_workers,
+#     )
 
-    from boltz.main import BoltzWriter
-    pred_writer = BoltzWriter(
-        data_dir=processed.targets_dir,
-        output_dir=out_dir / "predictions",
-        output_format=output_format,
-    )
+#     from boltz.main import BoltzWriter
+#     pred_writer = BoltzWriter(
+#         data_dir=processed.targets_dir,
+#         output_dir=out_dir / "predictions",
+#         output_format=output_format,
+#     )
 
-    trainer = Trainer(
-        default_root_dir=out_dir,
-        strategy=strategy,
-        callbacks=[pred_writer],
-        accelerator=accelerator,
-        devices=devices,
-        precision=32,
-    )
+#     trainer = Trainer(
+#         default_root_dir=out_dir,
+#         strategy=strategy,
+#         callbacks=[pred_writer],
+#         accelerator=accelerator,
+#         devices=devices,
+#         precision=32,
+#     )
 
-    trainer.predict(
-        model_module,
-        datamodule=data_module,
-        return_predictions=False,
-    )
+#     trainer.predict(
+#         model_module,
+#         datamodule=data_module,
+#         return_predictions=False,
+#     )
 
 
 tokens = [
@@ -1120,6 +1120,7 @@ def boltz_hallucination(
 
 
 def run_boltz_design(
+    boltz_path,
     main_dir,
     yaml_dir,
     boltz_model,
@@ -1225,7 +1226,6 @@ def run_boltz_design(
                         save_trajectory=save_trajectory
                     )
                     print('warm up done')     
-                    
                     output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure = boltz_hallucination(
                         boltz_model,
                         yaml_path,
@@ -1359,15 +1359,18 @@ def run_boltz_design(
                     boltz_model.predict_args['sampling_steps']=200
                     boltz_model.predict_args['write_full_pae']=True
                     
-                    predict(
-                        data=str(result_yaml),
-                        ccd_path=Path(ccd_path),
-                        out_dir=str(results_final_dir),
-                        model_module=boltz_model,
-                        accelerator="gpu",
-                        num_workers = num_workers,
-                        devices=1
-                    )
+
+                    import subprocess
+                    subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                    # predict(
+                    #     data=str(result_yaml),
+                    #     ccd_path=Path(ccd_path),
+                    #     out_dir=str(results_final_dir),
+                    #     model_module=boltz_model,
+                    #     accelerator="gpu",
+                    #     num_workers = num_workers,
+                    #     devices=1
+                    # )
 
                     gc.collect()
                     torch.cuda.empty_cache()
