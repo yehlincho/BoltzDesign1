@@ -1,71 +1,29 @@
+import json
+import logging
 import os
 import sys
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from pytorch_lightning import LightningModule
-
-import pickle
-import urllib.request
-from dataclasses import asdict, dataclass
+from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal, Optional
-import click
-import torch
-import json
-from pytorch_lightning import Trainer, seed_everything
-from pytorch_lightning.strategies import DDPStrategy
-from pytorch_lightning.utilities import rank_zero_only
-from tqdm import tqdm
-
-from boltz.data import const
-from boltz.data.module.inference import BoltzInferenceDataModule
-from boltz.data.msa.mmseqs2 import run_mmseqs2
-from boltz.data.parse.a3m import parse_a3m
-from boltz.data.parse.csv import parse_csv
-from boltz.data.parse.fasta import parse_fasta
-from boltz.data.parse.yaml import parse_yaml
-from boltz.data.types import MSA, Manifest, Record, Connection, Input, Structure
-from boltz.data.write.writer import BoltzWriter
-from boltz.model.model import Boltz1
-from boltz.main import BoltzProcessedInput, BoltzDiffusionParams
-from rdkit import Chem
-from boltz.data.feature import featurizer
-from boltz.data.tokenize.boltz import BoltzTokenizer, TokenData
-from boltz.data.feature.featurizer import BoltzFeaturizer
-from boltz.data.parse.schema import parse_boltz_schema
-# from boltzdesign_utils import predict
-
-from matplotlib.animation import FuncAnimation
 import numpy as np
-import yaml
-from pathlib import Path
 import pandas as pd
+import torch
+import yaml
+from Bio.PDB import PDBIO
+from Bio.PDB.MMCIFParser import MMCIFParser
+from prody import parsePDB
 
-# Get the project root directory (parent of boltzdesign)
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ligandmpnn_path = os.path.join(project_root, 'LigandMPNN')
 
-# Add project root and LigandMPNN to path if not already there
 if project_root not in sys.path:
     sys.path.append(project_root)
-if os.path.join(project_root, 'LigandMPNN') not in sys.path:
-    sys.path.append(os.path.join(project_root, 'LigandMPNN'))
+if ligandmpnn_path not in sys.path:
+    sys.path.append(ligandmpnn_path)
 
-from prody import parsePDB
-import numpy as np
-
-import yaml
-from pathlib import Path
 from run import main
-from argparse import Namespace
-from types import SimpleNamespace
-
-
-import sys
-import logging
-from Bio.PDB.MMCIFParser import MMCIFParser
-from Bio.PDB import PDBIO
 
 chain_to_number = {
     'A': 0,
@@ -351,7 +309,6 @@ def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=T
 def run_ligandmpnn_redesign(
     base_dir,
     pdb_dir,
-    ccd_path,
     boltz_path,
     yaml_dir,
     ligandmpnn_config,
@@ -454,15 +411,6 @@ def run_ligandmpnn_redesign(
                     final_yaml_path = os.path.join(lmpnn_yaml_dir, f'{pdb_name}_{idx+1}.yaml')
                     with open(final_yaml_path, 'w') as f:
                         yaml.dump(yaml_data, f)
-
-                    # predict(
-                    #     data=str(final_yaml_path),
-                    #     ccd_path=Path(ccd_path),
-                    #     out_dir=str(results_final_dir),
-                    #     model_module=boltz_model,
-                    #     accelerator="gpu",
-                    #     num_workers = 1
-                    # )
 
                     import subprocess
                     subprocess.run([boltz_path, 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])

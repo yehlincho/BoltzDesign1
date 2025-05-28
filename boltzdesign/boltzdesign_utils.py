@@ -2,41 +2,25 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from pytorch_lightning import LightningModule, Trainer, seed_everything
-from pytorch_lightning.strategies import DDPStrategy
-from pytorch_lightning.utilities import rank_zero_only
 import subprocess
 import pickle
-import urllib.request
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 import copy
-import click
-from tqdm import tqdm
 import random
 from boltz.data import const
-from boltz.data.module.inference import BoltzInferenceDataModule
-from boltz.data.msa.mmseqs2 import run_mmseqs2
-from boltz.data.parse.a3m import parse_a3m
-from boltz.data.parse.csv import parse_csv
-from boltz.data.parse.fasta import parse_fasta
-from boltz.data.parse.yaml import parse_yaml
-from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure, Interface
-from boltz.data.write.writer import BoltzWriter
+from boltz.data.types import MSA, Connection, Input, Structure, Interface
 from boltz.model.model import Boltz1
-from boltz.main import BoltzProcessedInput, BoltzDiffusionParams
-from boltz.data.feature import featurizer
-from boltz.data.tokenize.boltz import BoltzTokenizer, TokenData
+from boltz.main import BoltzDiffusionParams
+from boltz.data.tokenize.boltz import BoltzTokenizer
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.parse.schema import parse_boltz_schema
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
-from rdkit import Chem
-import rdkit
 import yaml
 import shutil
-from Bio.PDB import PDBParser, MMCIFParser  # Added MMCIFParser
+from Bio.PDB import PDBParser, MMCIFParser  
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -44,111 +28,75 @@ from matplotlib.animation import FuncAnimation
 from IPython.display import HTML, display
 import csv
 import gc
-
-# import matplotlib
-import numpy as np
-from scipy.special import expit as sigmoid
-
+import json
 import logging
+
 logging.basicConfig(level=logging.WARNING)
 
-# def predict(
-#     data: str,
-#     out_dir: str,
-#     ccd_path: str,
-#     model_module,  # Already loaded Boltz1 model
-#     cache: str = "~/.boltz",
-#     devices: int = 1,
-#     accelerator: str = "gpu",
-#     output_format: Literal["pdb", "mmcif"] = "mmcif",
-#     num_workers: int = 2,
-#     override: bool = False,
-#     seed: Optional[int] = None,
-#     use_msa_server: bool = False,
-#     msa_server_url: str = "https://api.colabfold.com",
-#     msa_pairing_strategy: str = "greedy",
-# ) -> None:
-#     """Run predictions with a preloaded Boltz1 model."""
+def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
+    print(output.keys())
+    output_dir = os.path.join(folder_dir, f"boltz_results_{name}", "predictions", name)
 
-#     if accelerator == "cpu":
-#         click.echo("Running on CPU, this will be slow. Consider using a GPU.")
+    os.makedirs(output_dir, exist_ok=True)
+    atoms = structure.atoms
+    atoms['coords'] = output['coords'][0].detach().cpu().numpy()[:atoms['coords'].shape[0],:]
+    atoms["is_present"] = True
+    residues = structure.residues
+    residues["is_present"] = True
+    interfaces = np.array([], dtype=Interface)
+    new_structure: Structure = replace(
+        structure,
+        atoms=atoms,
+        residues=residues,
+        interfaces=interfaces,
+    )
+    plddts= output['plddt'].detach().cpu().numpy()[0]        
+    path = Path(output_dir) / f"{name}_model_{model_idx}.cif"
+    with path.open("w") as f:
+        f.write(to_mmcif(new_structure, plddts=plddts))
 
-#     torch.set_grad_enabled(False)
-#     torch.set_float32_matmul_precision("highest")
+    # Save confidence summary
+    if "plddt" in output:
+        confidence_summary_dict = {}
+        for key in [
+            "confidence_score",
+            "ptm", 
+            "iptm",
+            "ligand_iptm",
+            "protein_iptm",
+            "complex_plddt",
+            "complex_iplddt", 
+            "complex_pde",
+            "complex_ipde",
+        ]:
+            if key in output:
+                confidence_summary_dict[key] = output[key].item()
+        
+        if "pair_chains_iptm" in output:
+            confidence_summary_dict["chains_ptm"] = {
+                idx: output["pair_chains_iptm"][idx][idx].item()
+                for idx in output["pair_chains_iptm"]
+            }
+            confidence_summary_dict["pair_chains_iptm"] = {
+                idx1: {
+                    idx2: output["pair_chains_iptm"][idx1][idx2].item()
+                    for idx2 in output["pair_chains_iptm"][idx1]
+                }
+                for idx1 in output["pair_chains_iptm"]
+            }
 
-#     if seed is not None:
-#         from pytorch_lightning.utilities.seed import seed_everything
-#         seed_everything(seed)
+        json_path = os.path.join(output_dir, f"confidence_{name}_model_{model_idx}.json")
+        with open(json_path, 'w') as f:
+            json.dump(confidence_summary_dict, f, indent=4)
+        # Save plddt
+        plddt = output["plddt"]
+        plddt_path = os.path.join(output_dir, f"plddt_{name}_model_{model_idx}.npz")
+        np.savez_compressed(plddt_path, plddt=plddt.cpu().detach().numpy())
 
-#     # Prepare paths
-#     cache = Path(cache).expanduser()
-#     cache.mkdir(parents=True, exist_ok=True)
-
-#     data = Path(data).expanduser()
-#     out_dir = Path(out_dir).expanduser()
-#     out_dir = out_dir / f"boltz_results_{data.stem}"
-#     out_dir.mkdir(parents=True, exist_ok=True)
-
-#     from boltz.main import check_inputs
-#     data = check_inputs(data, out_dir, override)
-#     if not data:
-#         click.echo("No predictions to run, exiting.")
-#         return
-
-#     strategy = "auto"
-#     if (isinstance(devices, int) and devices > 1) or (isinstance(devices, list) and len(devices) > 1):
-#         strategy = DDPStrategy()
-#         if len(data) < devices:
-#             raise ValueError("Number of requested devices is greater than the number of predictions.")
-
-#     click.echo(f"Running predictions for {len(data)} structure{'s' if len(data) > 1 else ''}")
-
-#     from boltz.main import process_inputs
-#     process_inputs(
-#         data=data,
-#         out_dir=out_dir,
-#         ccd_path=ccd_path,
-#         use_msa_server=use_msa_server,
-#         msa_server_url=msa_server_url,
-#         msa_pairing_strategy=msa_pairing_strategy,
-#     )
-
-#     from boltz.main import Manifest, BoltzProcessedInput
-#     processed_dir = out_dir / "processed"
-#     processed = BoltzProcessedInput(
-#         manifest=Manifest.load(processed_dir / "manifest.json"),
-#         targets_dir=processed_dir / "structures",
-#         msa_dir=processed_dir / "msa",
-#     )
-#     from boltz.main import BoltzInferenceDataModule
-#     data_module = BoltzInferenceDataModule(
-#         manifest=processed.manifest,
-#         target_dir=processed.targets_dir,
-#         msa_dir=processed.msa_dir,
-#         num_workers=num_workers,
-#     )
-
-#     from boltz.main import BoltzWriter
-#     pred_writer = BoltzWriter(
-#         data_dir=processed.targets_dir,
-#         output_dir=out_dir / "predictions",
-#         output_format=output_format,
-#     )
-
-#     trainer = Trainer(
-#         default_root_dir=out_dir,
-#         strategy=strategy,
-#         callbacks=[pred_writer],
-#         accelerator=accelerator,
-#         devices=devices,
-#         precision=32,
-#     )
-
-#     trainer.predict(
-#         model_module,
-#         datamodule=data_module,
-#         return_predictions=False,
-#     )
+    if "pae" in output:
+        pae = output["pae"]
+        pae_path = os.path.join(output_dir, f"pae_{name}_model_{model_idx}.npz")
+        np.savez_compressed(pae_path, pae=pae.cpu().detach().numpy())
 
 
 tokens = [
@@ -215,21 +163,10 @@ def visualize_training_history(best_batch, loss_history, sequence_history, disto
     mask = (best_batch['entity_id']==chain_to_number[binder_chain]).squeeze(0).detach().cpu().numpy()
     sequence_history = [seq[mask] for seq in sequence_history]
 
-    # Create save directory if specified
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
 
-    # # Plot loss history
-    # plt.figure(figsize=(8,4))
-    # plt.plot(loss_history)
-    # plt.xlabel('Steps')
-    # plt.ylabel('Loss')
-    # plt.title('Training Loss History')
-    # if save_dir:
-    #     plt.savefig(os.path.join(save_dir, f'{save_filename}_loss_history.png'))
-    # plt.show()
 
-    # Create distogram animation
     def create_distogram_animation():
         fig, ax = plt.subplots(figsize=(6,6))
         distogram_2d = distogram_history[0]
@@ -502,14 +439,6 @@ def get_boltz_model(checkpoint: Optional[str] = None, predict_args=None, device:
     )
     return model_module
 
-
-def get_coords(batch, output):
-    token_to_rep = batch['token_to_rep_atom'][0].detach().cpu()  # Fixed missing parentheses
-    indices = [torch.argmax(token_to_rep[i]).item() for i in range(token_to_rep.shape[0])]
-    sample_coords = output['sample_atom_coords'].detach()
-    sample_coords = sample_coords.cpu()
-    coords = sample_coords.numpy()[0, indices, :]
-    return coords
 
 
 def boltz_hallucination(
@@ -968,13 +897,8 @@ def boltz_hallucination(
             batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list= design(batch, iters=soft_iteration, soft = 0.0, e_soft=0.0, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts, save_trajectory=save_trajectory)
 
     def _run_model(boltz_model, batch, predict_args):
-        return boltz_model(
-            batch,
-            recycling_steps=predict_args["recycling_steps"],
-            num_sampling_steps=predict_args["sampling_steps"],
-            multiplicity_diffusion_train=1,
-            diffusion_samples=predict_args["diffusion_samples"],
-            run_confidence_sequentially=True)
+        boltz_model.predict_args = predict_args
+        return boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
 
     def visualize_results(plots):
         # Plot distogram predictions
@@ -1008,7 +932,7 @@ def boltz_hallucination(
         "sampling_steps": 200,  # Default value
         "diffusion_samples": 1,  # Default value
         "write_confidence_summary": True,
-        "write_full_pae": False,
+        "write_full_pae": True,
         "write_full_pde": False,
         }
 
@@ -1021,7 +945,7 @@ def boltz_hallucination(
         best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
         output = _run_model(boltz_model, best_batch, predict_args)
 
-        rg_loss, rg = add_rg_loss(output['sample_atom_coords'], best_batch, length, binder_chain)
+        rg_loss, rg = add_rg_loss(output['coords'], best_batch, length, binder_chain)
         return batch['res_type'].detach().cpu().numpy(), plots, loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list
 
     boltz_model.eval()
@@ -1037,7 +961,7 @@ def boltz_hallucination(
     "sampling_steps": 200,  # Default value
     "diffusion_samples": 1,  # Default value
     "write_confidence_summary": True,
-    "write_full_pae": False,
+    "write_full_pae": True,
     "write_full_pde": False,
     }
 
@@ -1062,13 +986,13 @@ def boltz_hallucination(
     def _update_batches(data, data_apo):
         target = parse_boltz_schema(name, data, ccd_lib)
         target_apo = parse_boltz_schema(name, data_apo, ccd_lib)
-        best_batch, _ = get_batch(target, msa_max_seqs, length, keep_record=True)
-        best_batch_apo, _ = get_batch(target_apo, msa_max_seqs, length, keep_record=True)
+        best_batch, best_structure = get_batch(target, msa_max_seqs, length, keep_record=True)
+        best_batch_apo, best_structure_apo = get_batch(target_apo, msa_max_seqs, length, keep_record=True)
         best_batch = {key: value.unsqueeze(0).to(device) if key != 'record' else value for key, value in best_batch.items()}
         best_batch_apo = {key: value.unsqueeze(0).to(device) if key != 'record' else value for key, value in best_batch_apo.items()}
-        return best_batch, best_batch_apo
+        return best_batch, best_batch_apo, best_structure, best_structure_apo
 
-    best_batch, best_batch_apo = _update_batches(data, data_apo)
+    best_batch, best_batch_apo, best_structure, best_structure_apo = _update_batches(data, data_apo)
     output = _run_model(boltz_model, best_batch, predict_args)
     output_apo = _run_model(boltz_model, best_batch_apo, predict_args)
 
@@ -1087,7 +1011,7 @@ def boltz_hallucination(
             sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
             mutated_sequence = _mutate(sequence, best_logits, i_prob)
             data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = mutated_sequence
-            best_batch, _ = _update_batches(data, data_apo)
+            best_batch, _, _, _ = _update_batches(data, data_apo)
             output = _run_model(boltz_model, best_batch, predict_args)
             
             iptm = output['iptm'].detach().cpu().numpy()
@@ -1110,13 +1034,13 @@ def boltz_hallucination(
             for seq_data in [data, data_apo]:
                 seq_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = prev_sequence
 
-        best_batch, best_batch_apo = _update_batches(data, data_apo)
+        best_batch, best_batch_apo, best_structure, best_structure_apo = _update_batches(data, data_apo)
 
         if step == semi_greedy_steps - 1:
             output = _run_model(boltz_model, best_batch, predict_args)
             output_apo = _run_model(boltz_model, best_batch_apo, predict_args)
 
-    return output, output_apo, best_batch, best_batch_apo, distogram_history, sequence_history, loss_history, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list, traj_plddt_list, structure
+    return output, output_apo, best_batch, best_batch_apo, best_structure, best_structure_apo, distogram_history, sequence_history, loss_history, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list, traj_plddt_list, structure
 
 
 def run_boltz_design(
@@ -1131,7 +1055,8 @@ def run_boltz_design(
     loss_scales=None,
     num_workers=1,
     show_animation=False,
-    save_trajectory=False
+    save_trajectory=False,
+    redo_boltz_predict=True,
 ):
     """
     Run Boltz protein design pipeline.
@@ -1207,7 +1132,6 @@ def run_boltz_design(
                 if k not in ['helix_loss_min', 'helix_loss_max', 'length_min', 'length_max']}
     for yaml_path in Path(yaml_dir).glob('*.yaml'):
         if yaml_path.name.endswith('.yaml'):
-            # try:
                 target_binder_input = yaml_path.stem
                 for itr in range(design_samples):
                     config['length'] = random.randint(config['length_min'],config['length_max'])
@@ -1226,7 +1150,7 @@ def run_boltz_design(
                         save_trajectory=save_trajectory
                     )
                     print('warm up done')     
-                    output, output_apo, best_batch, best_batch_apo, distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure = boltz_hallucination(
+                    output, output_apo, best_batch, best_batch_apo, best_structure, best_structure_apo ,distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure = boltz_hallucination(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
@@ -1249,14 +1173,11 @@ def run_boltz_design(
                         logmd.notebook()
                         print(logmd.url) 
                         atoms = structure.atoms
-                        # Reference coords: last frame in trajectory
                         ref_coords = traj_coords_list[-1][:atoms['coords'].shape[0], :]
                         for i in range(len(traj_coords_list)):
                             current_coords = traj_coords_list[i][:atoms['coords'].shape[0], :]
                             aligned_coords = align_points(current_coords, ref_coords)
                             structure.atoms['coords'] = aligned_coords
-                        # for i in range(len(traj_coords_list)):
-                        #     structure.atoms['coords'] = traj_coords_list[i][:atoms['coords'].shape[0],:]
                             structure.atoms["is_present"] = True
                             pdb_str = to_pdb(structure, plddts=traj_plddt_list[i])
                             pdb_str = "\n".join([line for line in pdb_str.split("\n") if line.startswith("ATOM") or line.startswith("HETATM")])
@@ -1270,8 +1191,8 @@ def run_boltz_design(
                     print(f"Apo Complex PLDDT: {float(output_apo['complex_plddt'].detach().cpu().numpy()):.3f}")
                     print('-' * 100)
 
-                    ca_coords = get_ca_coords(output['sample_atom_coords'], best_batch, binder_chain=config['binder_chain']).detach().cpu().numpy()
-                    ca_coords_apo = get_ca_coords(output_apo['sample_atom_coords'], best_batch_apo, binder_chain='A').detach().cpu().numpy()
+                    ca_coords = get_ca_coords(output['coords'], best_batch, binder_chain=config['binder_chain']).detach().cpu().numpy()
+                    ca_coords_apo = get_ca_coords(output_apo['coords'], best_batch_apo, binder_chain='A').detach().cpu().numpy()
 
                     rmsd = np_rmsd(ca_coords, ca_coords_apo)
                     print('-' * 100)
@@ -1334,12 +1255,11 @@ def run_boltz_design(
                         writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['iptm'].item(), loss_scales['helix_loss']])
 
                     result_yaml = os.path.join(results_yaml_dir, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
-                    output_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in output.items()}
                     best_batch_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in best_batch.items()}
                     best_sequence = ''.join([alphabet[i] for i in np.argmax(best_batch_cpu['res_type'][best_batch_cpu['entity_id']==chain_to_number[config['binder_chain']],:], axis=-1)])
                     print("best_sequence", best_sequence)
                     
-                    # Handle complex structure
+
                     shutil.copy2(yaml_path, result_yaml)
                     with open(result_yaml, 'r') as f:
                         data = yaml.safe_load(f)
@@ -1354,27 +1274,11 @@ def run_boltz_design(
 
                     with open(result_yaml, 'w') as f:
                         yaml.dump(data, f)
-
-                    boltz_model.predict_args['recycling_steps']=3
-                    boltz_model.predict_args['sampling_steps']=200
-                    boltz_model.predict_args['write_full_pae']=True
                     
-
-                    import subprocess
-                    subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
-                    # predict(
-                    #     data=str(result_yaml),
-                    #     ccd_path=Path(ccd_path),
-                    #     out_dir=str(results_final_dir),
-                    #     model_module=boltz_model,
-                    #     accelerator="gpu",
-                    #     num_workers = num_workers,
-                    #     devices=1
-                    # )
+                    if redo_boltz_predict:
+                        subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                    else:
+                        save_confidence_scores(results_final_dir, output, best_structure, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)
 
                     gc.collect()
                     torch.cuda.empty_cache()
-
-            # except Exception as e:
-            #     print(f"Error processing {target_binder_input} iteration {itr + 1}: {str(e)}")
-            #     continue
