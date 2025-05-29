@@ -1,111 +1,135 @@
-# BoltzDesign1
+# BoltzDesign1 🧬
 
-**BoltzDesign1** is a molecular design tool powered by the Boltz model. This guide provides setup instructions, usage configuration, and evaluation workflow. Example usage can be found in the notebook.
+**BoltzDesign1** is a molecular design tool powered by the Boltz model for designing protein-protein interactions and biomolecular complexes.
 
----
-
-## 🛠️ Setup & Installation
-
-Before running BoltzDesign1, configure your environment and install required dependencies.
-
-```bash
-conda create -n boltz_env python=3.10 -y
-conda activate boltz_env
-pip install boltz -U
-pip install matplotlib seaborn prody tqdm PyYAML requests
-```
-
-### 🔽 Download Boltz Weights and Dependencies
-
-RDKit CCD and Boltz model weights can be downloaded via:
-
-```python
-from boltz.main import download
-from pathlib import Path
-
-cache = Path("~/.boltz").expanduser()
-cache.mkdir(parents=True, exist_ok=True)
-download(cache)
-```
+> 📄 **Paper**: [BoltzDesign1: AI-Powered Molecular Design](https://www.biorxiv.org/content/10.1101/2025.04.06.647261v1)  
+> 🚀 **Colab**: *Coming Soon*
 
 ---
 
-## 📦 Dependencies
+## 🚀 Quick Start
+### Installation
 
-Required packages and tools:
-- `torch` — PyTorch, the core deep learning framework
-- `rdkit` — Toolkit for molecule visualization and manipulation
-- `boltz-1` — Core diffusion model
-- `LigandMPNN` — Ligand sequence model
-- `boltzdesign_utils` — Utility functions for model design pipeline
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yehlincho/BoltzDesign1.git
+   cd BoltzDesign1
+   ```
 
-To set up LigandMPNN and ProteinMPNN:
+2. **Run the automated setup**
+   ```bash
+   chmod +x setup.sh
+   ./setup.sh
+   ```
 
-```bash
-cd LigandMPNN
-bash get_model_params.sh "./model_params"
-```
-
-All code and model weights are provided under the MIT license.
-
----
-
-## ⚙️ Model Configuration
-
-The Boltz model uses the following default prediction arguments:
-
-```python
-predict_args = {
-    "recycling_steps": 0,
-    "sampling_steps": 200,
-    "diffusion_samples": 1,
-    "write_confidence_summary": True,
-    "write_full_pae": False,
-    "write_full_pde": False,
-}
-```
-
-These parameters can be modified to adjust sampling depth, recycling, and output verbosity.
+The setup script will automatically:
+- ✅ Create conda environment with Python 3.10
+- ✅ Install all required dependencies
+- ✅ Set up Jupyter kernel for notebooks
+- ✅ Download Boltz model weights
+- ✅ Configure LigandMPNN and ProteinMPNN
+- ✅ Optionally install PyRosetta
 
 ---
 
-## 🧬 Design Configuration
+## ⚙️ Design Configuration
 
-The molecular design process is controlled using this configuration:
+Configure your molecular design parameters:
 
 ```python
 config = {
+    # Optimization parameters
     'mutation_rate': 1,
-    'pre_iteration': 30,
-    'soft_iteration': 75,
-    'temp_iteration': 45,
-    'hard_iteration': 5,
-    'semi_greedy_steps': 0,
-    'learning_rate_pre': 0.2,
-    'learning_rate': 0.1,
+    'learning_rate_pre': 0.2, ## Pre_iteration stage
+    'learning_rate': 0.1, ## Soft, temp, hard stages
+    # Iteration stages
+    'pre_iteration': 30,      # Initial logits optimization
+    'soft_iteration': 75,     # Logits to Softmax optimization
+    'temp_iteration': 45,     # Softmax Temperature annealing
+    'hard_iteration': 5,      # Final hard encoding optimization 
+    'semi_greedy_steps': 0,   # MCMC based on iPTM score
+    # Algorithm settings
     'design_algorithm': '3stages',
-    'set_train': True,
-    'use_temp': True,
-    'disconnect_feats': True,
-    'disconnect_pairformer': False,
-    'length': 150
 }
 ```
+---
 
+## 🔄 Sequence Redesign
+
+BoltzDesign1 supports sequence optimization using:
+
+### ProteinMPNN
+- **Use case**: Protein-protein interface design
+
+### LigandMPNN  
+- **Use case**: Protein-ligand and non-protein biomolecule interfaces
+
+### Default Behavior
+- Interface residues (< 4 Å) are **fixed** during design
+- Non-interface residues are **redesigned**
+- Custom interface definitions can be specified
 
 ---
 
-## 🔁 Sequence Redesign
+## ✅ Structure Validation
 
-Sequence redesign is supported via:
+### Primary Evaluation: AlphaFold3
+Final structures are validated using **AlphaFold3** for:
+- Structure quality assessment
+- Confidence scoring
+- Cross-validation against design targets
 
-- **ProteinMPNN** – for redesigning protein–protein interfaces (PPIs)
-- **LigandMPNN** – for non-protein biomolecule binding partners
+> ⚠️ **Note**: AlphaFold3 setup not included. Install separately following [official instructions](https://github.com/google-deepmind/alphafold3)
 
-By default, residues at the interface (with CA–CA distance < 5 Å) are fixed, while the rest are redesigned.
+### Alternative Options
+- **Chai-1**: Fast structure prediction
+- **ColabFold**: Accessible online validation
 
 ---
 
-## ✅ Final Evaluation
+## 📋 Development Roadmap
 
-Final structure validation is performed using **AlphaFold3 (AF3)**. However, alternative evaluation models like **Chai** or others can be integrated depending on your workflow.
+### 🔬 Colab implementation
+- [ ] **AlphaFold3 integration** for validation pipeline
+
+### ⚡ Model Optimization  
+- [ ] **Boltz1x integration** - Next-generation model
+- [ ] **Multi Chains Design** - Currently supporting single chain design
+- [ ] **Multi-state optimization** - Alternating conformations
+- [ ] **Specificity enhancement** - Target selectivity
+
+### 🔧 Pipeline Features
+- [ ] **RNA MSA generation** - Multiple sequence alignments
+- [ ] **Advanced filtering**:
+  - [ ] Docking score integration
+  - [ ] Metal coordination prediction
+  - [ ] DNA/RNA specificity scoring
+- [ ] **Enhanced scoring**: Currently uses Rosetta scores (from [BindCraft])
+
+## 📄 License & Citation
+
+**License**: MIT License - See LICENSE file for details
+**Citation**: If you use BoltzDesign1 in your research, please cite:
+```
+@article{cho2025boltzdesign1,
+  title={Boltzdesign1: Inverting all-atom structure prediction model for generalized biomolecular binder design},
+  author={Cho, Yehlin and Pacesa, Martin and Zhang, Zhidian and Correia, Bruno E and Ovchinnikov, Sergey},
+  journal={bioRxiv},
+  pages={2025--04},
+  year={2025},
+  publisher={Cold Spring Harbor Laboratory}
+}
+```
+---
+
+## 📧 Contact & Support
+
+**Questions or Collaboration**: yehlin@mit.edu
+
+**Issues**: Please report bugs and feature requests via GitHub Issues
+
+---
+
+## ⚠️ Important Disclaimer
+
+> **EXPERIMENTAL SOFTWARE**: This pipeline is under active development and has **NOT been experimentally validated** in laboratory settings. We release this code to enable community contributions and collaborative development. Use at your own discretion and validate results independently.

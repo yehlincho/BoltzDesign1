@@ -14,7 +14,6 @@ from Bio.PDB import PDBIO
 from Bio.PDB.MMCIFParser import MMCIFParser
 from prody import parsePDB
 
-
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ligandmpnn_path = os.path.join(project_root, 'LigandMPNN')
 
@@ -246,7 +245,8 @@ def get_protein_ligand_interface(pdb_id, cutoff=6, non_protein_target=True, bind
     
     return interface_residues
 
-def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=True, binder_chain='A', target_chains=None):
+def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=True, binder_chain='A', target_chains="all"):
+    print("target_chains", target_chains)
     """
     Get interface residues between a protein and ligand/target from a PDB structure.
     Args:
@@ -281,7 +281,7 @@ def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=T
                 interface_residues.add(protein.getResnums()[i])
                 
     else:
-        if target_chains == None:
+        if target_chains == "all":
             all_chains = set([chain.getChid() for chain in pdb.select('protein').getHierView().iterChains()])
             target_chains = list(all_chains - {binder_chain})
             print("target_chains", target_chains)

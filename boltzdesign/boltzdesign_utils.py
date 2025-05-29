@@ -148,7 +148,6 @@ chain_to_number = {
     'I': 8,
     'J': 9,
 }
-
 def visualize_training_history(best_batch, loss_history, sequence_history, distogram_history, length, binder_chain='A', save_dir=None, save_filename=None):
     """
     Visualize training history including loss plot, distogram animation, and sequence evolution animation.
@@ -168,9 +167,9 @@ def visualize_training_history(best_batch, loss_history, sequence_history, disto
 
 
     def create_distogram_animation():
+        plt.style.use('default')  # Use default white background style
         fig, ax = plt.subplots(figsize=(6,6))
         distogram_2d = distogram_history[0]
-        # im = ax.imshow(distogram_2d, cmap='viridis')
         im = ax.imshow(distogram_2d)
     
         plt.colorbar(im, ax=ax)
@@ -190,6 +189,7 @@ def visualize_training_history(best_batch, loss_history, sequence_history, disto
 
     # Create sequence evolution animation
     def create_sequence_animation():
+        plt.style.use('default')  # Use default white background style
         fig, ax = plt.subplots(figsize=(12,3.5))
         im = ax.imshow(sequence_history[0].T, vmin=0, vmax=1, cmap='Blues', aspect='auto', alpha=0.8)
         plt.colorbar(im, ax=ax)
@@ -449,6 +449,7 @@ def boltz_hallucination(
     length=100,
     binder_chain='A',
     design_algorithm="3stages",
+    recycling_steps=0,
     pre_iteration=20,
     soft_iteration=50, 
     soft_iteration_1=50,
@@ -458,7 +459,6 @@ def boltz_hallucination(
     semi_greedy_steps=0,
     learning_rate=0.1,
     learning_rate_pre=0.1,
-    mutation_rate=1,
     inter_chain_cutoff=21.0,
     intra_chain_cutoff=14.0,
     num_inter_contacts=2,
@@ -487,7 +487,7 @@ def boltz_hallucination(
 ):
 
     predict_args = {
-        "recycling_steps": 0,  # Default value
+        "recycling_steps": recycling_steps,  # Default value
         "sampling_steps": 200,  # Default value
         "diffusion_samples": 1,  # Default value
         "write_confidence_summary": True,
@@ -1069,7 +1069,7 @@ def run_boltz_design(
     """
     if config is None:
         config = {
-            'mutation_rate': 1,
+            'recycling_steps': 0,
             'pre_iteration': 30,
             'soft_iteration': 75, 
             'soft_iteration_1': 50,
@@ -1110,7 +1110,8 @@ def run_boltz_design(
     version_dir = os.path.join(main_dir, version_name)
     os.makedirs(version_dir, exist_ok=True)
 
-    ccd_lib = pickle.load(open(ccd_path, 'rb'))
+    with open(os.path.expanduser(ccd_path), 'rb') as f:
+        ccd_lib = pickle.load(f)
     
     results_final_dir = os.path.join(version_dir, 'results_final')
     results_yaml_dir = os.path.join(version_dir, 'results_yaml')

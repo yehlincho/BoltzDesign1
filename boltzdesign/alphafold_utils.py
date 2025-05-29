@@ -145,7 +145,7 @@ def process_yaml_files(yaml_dir, af_input_dir, af_input_apo_dir, target_type='sm
                 protein=protein_seq,
                 protein_id='A')
                 
-        elif binder_type == 'metal':
+        elif target_type == 'metal':
             # Metal binder
             binder_seq = yaml_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence']
             

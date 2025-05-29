@@ -18,8 +18,6 @@ length_max: 180
 length_min: 130
 mask_ligand: false
 msa_max_seqs: 4096
-mutation_rate: 1
-non_protein_target: true
 num_inter_contacts: 2
 num_intra_contacts: 4
 optimize_contact_per_binder_pos: true
@@ -33,3 +31,4 @@ soft_iteration_1: 50
 soft_iteration_2: 50
 temp_iteration: 45
 use_temp: True
+recycling_steps: 0
