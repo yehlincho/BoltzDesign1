@@ -1,12 +1,5 @@
 import os
-import pyrosetta; pyrosetta.init()
-pyrosetta.init(extra_options="-holes:dalphaball")
 import pyrosetta as pr
-pr.init(extra_options="-holes:dalphaball")
-advanced_settings={}
-advanced_settings["dalphaball_path"] = '/home/jupyter-yehlin/Pairformer/boltzdesign/DAlphaBall.gcc'
-pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {advanced_settings["dalphaball_path"]} -corrections::beta_nov16 true -relax:default_repeats 1')
-
 from scipy.spatial import cKDTree
 from pyrosetta.rosetta.core.kinematics import MoveMap
 from pyrosetta.rosetta.core.select.residue_selector import ChainSelector
@@ -17,21 +10,22 @@ from pyrosetta.rosetta.core.simple_metrics.metrics import RMSDMetric
 from pyrosetta.rosetta.core.select import get_residues_from_subset
 from pyrosetta.rosetta.core.io import pose_from_pose
 from pyrosetta.rosetta.protocols.rosetta_scripts import XmlObjects
-from Bio.PDB import (PDBParser, DSSP, Selection, Polypeptide, PDBIO, 
+from Bio.PDB import (PDBParser, DSSP, Selection, Polypeptide, PDBIO,
                     Select, Chain, Superimposer, MMCIFParser)
 from Bio.PDB.Selection import unfold_entities
-import os
 from pathlib import Path
 import pandas as pd
-import shutil
-import zipfile
-import json
 import numpy as np
 import torch
 import re
 import time
 import argparse
+import zipfile
 from boltzdesign_utils import *
+
+# Initialize PyRosetta with all needed options
+dalphaball_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'DAlphaBall.gcc')
+pr.init(f'-ignore_unrecognized_res -ignore_zero_occupancy -mute all -holes:dalphaball {dalphaball_path} -corrections::beta_nov16 true -relax:default_repeats 1')
 
 def radius_of_gyration(path, chain_id='B'):
     if path.endswith('.cif'):
@@ -487,58 +481,22 @@ def measure_rosetta_energy(pdbs_path, pdbs_apo_path, save_dir, binder_holo_chain
 
                 rg, length = radius_of_gyration(cif_path, chain_id='B')
                 
+                # Extract model name without relax_ prefix if present
+                model_base = row['Model'].split('relax_')[-1].split('_model.pdb')[0] if row['Model'].startswith('relax') else row['Model'].split('_model.pdb')[0]
+                
+                # Construct paths
+                base_path = '/'.join(row['PDB'].split('/')[:-1]) + '/design_final_af3/' + model_base
+                confidenece_json_1 = f"{base_path}/{model_base}_summary_confidences.json"
+                confidenece_json_2 = f"{base_path}/{model_base}_confidences.json"
+                af_cif = f"{base_path}/{model_base}_model.cif"
+                
+                aa_seq = get_sequence(af_cif, chain_id='B')
+                
+                # Set PDB paths
                 if row['Model'].startswith('relax'):
-                    confidenece_json_1 = (
-                        '/'.join(row['PDB'].split('/')[:-1]) + '/' +
-                        'boltz_hallucination_success_lmpnn_final_af3' + '/' +
-                        row['Model'].split('relax_')[1].split('_model.pdb')[0] + '/' +
-                        row['Model'].split('relax_')[1].split('_model.pdb')[0] +
-                        '_summary_confidences.json'
-                    )
-
-                    confidenece_json_2 = (
-                        '/'.join(row['PDB'].split('/')[:-1]) + '/' +
-                        'boltz_hallucination_success_lmpnn_final_af3' + '/' +
-                        row['Model'].split('relax_')[1].split('_model.pdb')[0] + '/' +
-                        row['Model'].split('relax_')[1].split('_model.pdb')[0] +
-                        '_confidences.json'
-                    )
-
-                    af_cif = ('/'.join(row['PDB'].split('/')[:-1]) + '/' + \
-                            'boltz_hallucination_success_lmpnn_final_af3' + '/' + \
-                            row['Model'].split('relax_')[1].split('_model.pdb')[0] + '/' + \
-                            row['Model'].split('relax_')[1].split('_model.pdb')[0] + \
-                            '_model.cif')
-                    aa_seq = get_sequence(af_cif, chain_id='B')
-
                     af_holo_pdb = pdbs_path + '/' + row['Model'].split('relax_')[1]
                     af_apo_pdb = pdbs_apo_path + '/' + row['Model'].split('relax_')[1]
-                    
                 else:
-                    confidenece_json_1 = (
-                        '/'.join(row['PDB'].split('/')[:-1]) + '/' +
-                        'boltz_hallucination_success_lmpnn_final_af3' + '/' +
-                        row['Model'].split('_model.pdb')[0] + '/' +
-                        row['Model'].split('_model.pdb')[0] +
-                        '_summary_confidences.json'
-                    )
-
-                    confidenece_json_2 = (
-                        '/'.join(row['PDB'].split('/')[:-1]) + '/' +
-                        'boltz_hallucination_success_lmpnn_final_af3' + '/' +
-                        row['Model'].split('_model.pdb')[0] + '/' +
-                        row['Model'].split('_model.pdb')[0] +
-                        '_confidences.json'
-                    )
-
-                    af_cif =(
-                        '/'.join(row['PDB'].split('/')[:-1]) + '/' +
-                        'boltz_hallucination_success_lmpnn_final_af3' + '/' +
-                        row['Model'].split('_model.pdb')[0] + '/' +
-                        row['Model'].split('_model.pdb')[0] +
-                        '_model.cif')
-
-                    aa_seq = get_sequence(af_cif, chain_id='B')
                     af_holo_pdb = pdbs_path + '/' + row['Model']
                     af_apo_pdb = pdbs_apo_path + '/' + row['Model']
 

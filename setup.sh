@@ -25,7 +25,6 @@ else
     echo "❌ boltz directory not found. Please run this script from the project root."
     exit 1
 fi
-
 # Install conda dependencies
 echo "🔧 Installing conda dependencies..."
 conda install -c anaconda ipykernel -y
@@ -34,13 +33,10 @@ conda install -c anaconda ipykernel -y
 echo "🔧 Installing Python dependencies..."
 pip install matplotlib seaborn prody tqdm PyYAML requests pypdb py3Dmol logmd==0.1.45
 
-# Optional PyRosetta installation
-read -p "🤖 Install PyRosetta? (y/N): " install_pyrosetta
-if [[ $install_pyrosetta =~ ^[Yy]$ ]]; then
-    echo "⏳ Installing PyRosetta (this may take a while)..."
-    pip install pyrosettacolabsetup pyrosetta-installer
-    python -c 'import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()'
-fi
+# Install PyRosetta
+echo "⏳ Installing PyRosetta (this may take a while)..."
+pip install pyrosettacolabsetup pyrosetta-installer
+python -c 'import pyrosetta_installer; pyrosetta_installer.install_pyrosetta()'
 
 # Download Boltz weights and dependencies
 echo "⬇️  Downloading Boltz weights and dependencies..."
@@ -60,6 +56,9 @@ if [ -d "LigandMPNN" ]; then
     bash get_model_params.sh "./model_params"
     cd ..
 fi
+
+# Make DAlphaBall.gcc executable
+chmod +x "boltzdesign/DAlphaBall.gcc" || { echo -e "Error: Failed to chmod DAlphaBall.gcc"; exit 1; }
 
 # Setup Jupyter kernel for the environment
 echo "📓 Setting up Jupyter kernel..."

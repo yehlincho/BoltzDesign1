@@ -324,11 +324,11 @@ def run_ligandmpnn_redesign(
 ):
     # Set default output directories if not provided
     if out_dir is None:
-        out_dir = os.path.join(base_dir, 'lmpnn_redesigned_fa')
+        out_dir = os.path.join(base_dir, '01_lmpnn_redesigned_fa')
     if lmpnn_yaml_dir is None:
-        lmpnn_yaml_dir = os.path.join(base_dir, 'lmpnn_redesigned_yaml')
+        lmpnn_yaml_dir = os.path.join(base_dir, '01_lmpnn_redesigned_yaml')
     if results_final_dir is None:
-        results_final_dir = os.path.join(base_dir, 'lmpnn_redesigned')
+        results_final_dir = os.path.join(base_dir, '01_lmpnn_redesigned')
 
     # Create required directories
     for directory in [out_dir, lmpnn_yaml_dir, results_final_dir]:

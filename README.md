@@ -22,6 +22,8 @@
    ./setup.sh
    ```
 
+> ⚠️ **Note**: AlphaFold3 setup not included. Install separately following [official instructions](https://github.com/google-deepmind/alphafold3)
+
 The setup script will automatically:
 - ✅ Create conda environment with Python 3.10
 - ✅ Install all required dependencies
@@ -29,8 +31,27 @@ The setup script will automatically:
 - ✅ Download Boltz model weights
 - ✅ Configure LigandMPNN and ProteinMPNN
 - ✅ Optionally install PyRosetta
+- ❌ Need to install AF3 separately
 
 ---
+
+## Run Code End-to-End
+Run the complete pipeline from BoltzDesign to LigandMPNN/ProteinMPNN redesign and AlphaFold3 cross-validation.
+
+
+Examle for small molecule:
+python boltzdesign.py --target_name 7v11 --target_type small_molecule --target_mols OQO --gpu_id 0 --design_samples 2 --suffix 1
+
+Example for DNA/RNA PDB design:
+python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D --gpu_id 0 --design_samples 5 --suffix 1
+
+⚠️ **Warning**: To run the AlphaFold3 cross-validation pipeline, you need to specify your AlphaFold3 directory, Docker name, database settings, and conda environment in the configuration. These can be set using the following arguments:
+- `--alphafold_dir`: Path to your AlphaFold3 installation (default: ~/alphafold3)
+- `--af3_docker_name`: Name of your AlphaFold3 Docker container
+- `--af3_database_settings`: Path to AlphaFold3 database
+- `--af3_conda_env`: Name of your AlphaFold3 conda environment
+
+If you want to disable af3 cross validation add flag --run_alphafold False
 
 ## ⚙️ Design Configuration
 
@@ -64,28 +85,33 @@ BoltzDesign1 supports sequence optimization using:
 ### LigandMPNN  
 - **Use case**: Protein-ligand and non-protein biomolecule interfaces
 
-### Default Behavior
+### Default setting
 - Interface residues (< 4 Å) are **fixed** during design
 - Non-interface residues are **redesigned**
 - Custom interface definitions can be specified
 
 ---
-
 ## ✅ Structure Validation
 
 ### Primary Evaluation: AlphaFold3
 Final structures are validated using **AlphaFold3** for:
-- Structure quality assessment
+- Structure quality assessment 
 - Confidence scoring
 - Cross-validation against design targets
 
-> ⚠️ **Note**: AlphaFold3 setup not included. Install separately following [official instructions](https://github.com/google-deepmind/alphafold3)
-
 ### Alternative Options
-- **Chai-1**: Fast structure prediction
-- **ColabFold**: Accessible online validation
+- **Chai-1**: All-atom structure prediction
+- **AlphaFold**: Protein monomer and multimer structure prediction
 
 ---
+
+## 🎯 Successful Designs
+
+After running the pipeline in `boltzdesign.py`, high-confidence designs can be found in:
+
+`your_output_folder/ligandmpnn_cutoff_(interface threshold)/03_af_pdb_success`
+
+The designs are saved along with `high_iptm_confidence_scores.csv`, which contains the iPTM and pLDDT scores for each design.
 
 ## 📋 Development Roadmap
 
@@ -93,18 +119,19 @@ Final structures are validated using **AlphaFold3** for:
 - [ ] **AlphaFold3 integration** for validation pipeline
 
 ### ⚡ Model Optimization  
-- [ ] **Boltz1x integration** - Next-generation model
+- [ ] **Boltz1x Integration** 
 - [ ] **Multi Chains Design** - Currently supporting single chain design
 - [ ] **Multi-state optimization** - Alternating conformations
 - [ ] **Specificity enhancement** - Target selectivity
-
 ### 🔧 Pipeline Features
-- [ ] **RNA MSA generation** - Multiple sequence alignments
-- [ ] **Advanced filtering**:
+- [ ] **RNA MSA Generation** - Multiple sequence alignments
+  - Get Colab version of MSA extraction from ColabNuFold (https://colab.research.google.com/github/kiharalab/nufold/blob/master/ColabNuFold.ipynb#scrollTo=KDs4o5Bv35MI)
+- [ ] **Input Support for DNA and RNA Modifications**
+- [ ] **Advanced Filtering**:
   - [ ] Docking score integration
   - [ ] Metal coordination prediction
   - [ ] DNA/RNA specificity scoring
-- [ ] **Enhanced scoring**: Currently uses Rosetta scores (from [BindCraft])
+- [ ] **Enhanced Scoring**: Currently uses Rosetta scores (from [BindCraft])
 
 ## 📄 License & Citation
 

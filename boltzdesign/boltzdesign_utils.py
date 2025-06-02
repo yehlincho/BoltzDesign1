@@ -838,7 +838,7 @@ def boltz_hallucination(
                 optimizer.step()
                 optimizer.zero_grad()
                 current_lr = optimizer.param_groups[0]['lr']
-                print(f"Epoch {i}: lr: {current_lr:.2f}, soft: {opt['soft']:.2f}, hard: {opt['hard']:.2f}, temp: {opt['temp']:.2f}, total loss: {total_loss.item():.2f}, {loss_str}")
+                print(f"Epoch {i}: lr: {current_lr:.3f}, soft: {opt['soft']:.2f}, hard: {opt['hard']:.2f}, temp: {opt['temp']:.2f}, total loss: {total_loss.item():.2f}, {loss_str}")
         
         return batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list
 
@@ -878,7 +878,7 @@ def boltz_hallucination(
             print("softmax(T=1) to softmax(T=0.01)")
             print('-'*100)
             print("set res_type_logits to logits")
-            new_logits = batch["res_type_logits"].clone().detach().requires_grad_(True)
+            new_logits = (alpha * batch["res_type_logits"]).clone().detach().requires_grad_(True)
             batch['res_type_logits'] = new_logits
             optimizer = torch.optim.SGD([batch['res_type_logits']], lr=learning_rate)
             batch, plots, loss_history, i_con_loss_history, con_loss_history,plddt_loss_history, distogram_history, sequence_history, traj_coords_list3, traj_plddt_list3 = design(batch, iters=temp_iteration, soft=1.0, temp = 1.0,e_temp=0.01, num_optimizing_binder_pos=8, e_num_optimizing_binder_pos=12,  mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts, save_trajectory=save_trajectory)
@@ -939,13 +939,6 @@ def boltz_hallucination(
         best_logits = batch['res_type_logits']
         best_seq = ''.join([alphabet[i] for i in torch.argmax(batch['res_type'][batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
         data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
-        
-        target = parse_boltz_schema(name, data, ccd_lib)
-        best_batch,_ = get_batch(target, msa_max_seqs, length)
-        best_batch = {key: value.unsqueeze(0).to(device) for key, value in best_batch.items()}
-        output = _run_model(boltz_model, best_batch, predict_args)
-
-        rg_loss, rg = add_rg_loss(output['coords'], best_batch, length, binder_chain)
         return batch['res_type'].detach().cpu().numpy(), plots, loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list
 
     boltz_model.eval()
@@ -1115,10 +1108,12 @@ def run_boltz_design(
     
     results_final_dir = os.path.join(version_dir, 'results_final')
     results_yaml_dir = os.path.join(version_dir, 'results_yaml')
+    results_final_dir_apo = os.path.join(version_dir, 'results_final_apo')
+    results_yaml_dir_apo = os.path.join(version_dir, 'results_yaml_apo')
     loss_dir = os.path.join(version_dir, 'loss')
     animation_save_dir = os.path.join(version_dir, 'animation')
 
-    for directory in [results_yaml_dir, results_final_dir, loss_dir, animation_save_dir]:
+    for directory in [results_yaml_dir, results_final_dir, results_yaml_dir_apo, results_final_dir_apo, loss_dir, animation_save_dir]:
         os.makedirs(directory, exist_ok=True)
 
     # Save config
@@ -1256,6 +1251,7 @@ def run_boltz_design(
                         writer.writerow([target_binder_input, config['length'], itr + 1, rmsd, output['complex_plddt'].item(), output['iptm'].item(), loss_scales['helix_loss']])
 
                     result_yaml = os.path.join(results_yaml_dir, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
+                    result_yaml_apo = os.path.join(results_yaml_dir_apo, f'{target_binder_input}_results_itr{itr + 1}_length{config["length"]}.yaml')
                     best_batch_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in best_batch.items()}
                     best_sequence = ''.join([alphabet[i] for i in np.argmax(best_batch_cpu['res_type'][best_batch_cpu['entity_id']==chain_to_number[config['binder_chain']],:], axis=-1)])
                     print("best_sequence", best_sequence)
@@ -1275,11 +1271,21 @@ def run_boltz_design(
 
                     with open(result_yaml, 'w') as f:
                         yaml.dump(data, f)
-                    
+
+                    shutil.copy2(result_yaml, result_yaml_apo)
+                    with open(result_yaml_apo, 'r') as f:
+                        data_apo = yaml.safe_load(f)
+                    data_apo['sequences'] = [data_apo['sequences'][chain_to_number[config['binder_chain']]]]
+                    data_apo.pop('constraints', None)   
+
+                    with open(result_yaml_apo, 'w') as f:
+                        yaml.dump(data_apo, f)
+
                     if redo_boltz_predict:
                         subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                        subprocess.run([boltz_path, 'predict', str(result_yaml_apo), '--out_dir', str(results_final_dir_apo), '--write_full_pae'])
                     else:
                         save_confidence_scores(results_final_dir, output, best_structure, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)
-
+                        save_confidence_scores(results_final_dir_apo, output_apo, best_structure_apo, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)
                     gc.collect()
                     torch.cuda.empty_cache()

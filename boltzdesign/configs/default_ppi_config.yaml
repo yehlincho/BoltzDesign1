@@ -20,12 +20,12 @@ mask_ligand: false
 msa_max_seqs: 4096
 non_protein_target: false
 num_inter_contacts: 2
-num_intra_contacts: 4
+num_intra_contacts: 2
 optimize_contact_per_binder_pos: true
 optimizer_type: SGD
 pocket_conditioning: true
 pre_iteration: 30
-semi_greedy_steps: 0
+semi_greedy_steps: 2
 set_train: true
 soft_iteration: 80
 soft_iteration_1: 50

@@ -40,7 +40,6 @@ class Config:
         for directory in [self.MAIN_DIR, self.PDB_DIR, self.MSA_DIR, self.YAML_DIR, self.DESIGN_DIR]:
             directory.mkdir(parents=True, exist_ok=True)
 
-
 # Utility functions
 def download_pdb(pdb_code: str, save_path: Path) -> bool:
     """Download PDB file from RCSB.
@@ -188,46 +187,88 @@ def get_nucleotide_from_pdb(pdb_path):
             
     return sequences
 
-
-def generate_yaml_from_pdb(pdb_code: str, target_type: str, config: Config, binder_id: str = 'A', target_ids: list = None, target_mols: str = None, constraints: dict = None, modifications: dict = None, modification_target: str = None, use_msa: bool = False):
-    """Generate YAML from PDB file.
-    Args:
-        pdb_code: PDB identifier
-        target_type: Type of target ('rna', 'dna', 'protein', 'small_molecule')
-        config: Configuration object
-        binder_id: Chain ID for the binder
-        target_ids: List of target chain/residue IDs
-    """
-    download_pdb(pdb_code, config.PDB_DIR)
-    pdb_path = config.PDB_DIR / f"{pdb_code}.pdb"
-    
-    target = []
-    if target_type in ['rna', 'dna']:
-        nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
-        for target_id in target_ids:
-            target.append(nucleotide_dict[target_id]['seq'])
-    elif target_type == 'small_molecule':
-        ligand_dict = get_ligand_from_pdb(pdb_code)
-        for target_mol in target_mols:
-            print(target_mol, ligand_dict.keys())
-            target.append(ligand_dict[target_mol])
-    elif target_type == 'protein':
-        chain_sequences = get_chains_sequence(pdb_path)
-        for target_id in target_ids:
-            target.append(chain_sequences[target_id])
+def process_modifications(modifications: str, modifications_positions: str):
+    """Process modifications data"""
+    if modifications and modifications_positions:
+        mod_list = [mod.strip() for mod in modifications.split(',')]
+        pos_list = [int(pos.strip()) for pos in modifications_positions.split(',')]
+        
+        if len(mod_list) != len(pos_list):
+            raise ValueError("Number of modifications and positions must match.")
+        
+        modifications_data = []
+        for mod, pos in zip(mod_list, pos_list):
+            modifications_data.append({
+                'position': pos,
+                'ccd': mod
+            })
     else:
-        raise ValueError(f"Unsupported target type: {target_type}")
-    return generate_yaml_for_taget_binder(pdb_code, target_type, target, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, modification_target=modification_target, use_msa=use_msa)
+        modifications_data = None
+    return modifications_data
 
+def setup_constraints(contact_residues: str, binder_id: str, target_id: str):
+    """Setup binding constraints"""
+    constraints = None
+    if contact_residues:
+        residues = [int(x.strip()) for x in contact_residues.split(",")]
+        constraints = {
+            'pocket': {
+                'binder': binder_id,
+                'contacts': [[target_id, res] for res in residues]
+            }
+        }
+    return constraints
 
-def generate_custom_yaml(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, modification_target: str = None, use_msa: bool = False) -> dict:
-    """
-    Generate YAML content for a custom target binder with multiple targets and create the YAML file.
-    """
-    return generate_yaml_for_taget_binder(name, type, targets, config=config, binder_id=binder_id, constraints=constraints, modifications=modifications, modification_target=modification_target, use_msa=use_msa)
-
+def process_design_constraints(target_id_map: dict, modifications: str, modifications_positions: str, modification_target: str, contact_residues: str, constraint_target: str, binder_id: str):
+    """Process design constraints and modifications"""
+    if not (contact_residues or modifications):
+        return None, None
+        
+    constraint_target = target_id_map.get(constraint_target, '') if contact_residues else ''
+    modification_target = target_id_map.get(modification_target, '') if modifications else ''
+ 
+    modifications = {
+        'data': process_modifications(modifications, modifications_positions),
+        'target': modification_target
+    }
+    constraints = setup_constraints(contact_residues, binder_id, constraint_target)
     
-def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, modification_target: str = None, use_msa: bool = False) -> dict:
+    return constraints, modifications
+    
+def build_chain_dict(targets: list, target_type: str, binder_id: str, constraints: dict = None, modifications: dict = None, modification_target: str = None) -> dict:
+    # Build chain dictionary
+    chain_dict = {binder_id: {'type': 'protein', 'sequence': 'X' * 100}}
+    # Map target types to their YAML representation
+    type_map = {
+        'protein': {'type': 'protein', 'sequence': True, 'msa': 'empty'},
+        'small_molecule': {'type': 'ligand', 'smiles': True},
+        'metal': {'type': 'ligand', 'ccd': True},
+        'dna': {'type': 'dna', 'sequence': True},
+        'rna': {'type': 'rna', 'sequence': True}
+    }
+    yaml_target_ids = []
+    
+    for i, target in enumerate(targets):
+        # Get letters in order, removing binder_id
+        available_letters = ''.join(c for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' if c != binder_id)
+        target_id = available_letters[i]
+        
+        yaml_target_ids.append(target_id)
+        target_info = {'id': target_id}
+        type_info = type_map[target_type]
+
+        # Add appropriate fields based on target type
+        for field, value in type_info.items():
+            if value is True:
+                target_info[field] = target
+            elif value:
+                target_info[field] = value
+                
+        chain_dict[target_id] = target_info
+        
+    return chain_dict, yaml_target_ids
+
+def generate_yaml_for_target_binder(name:str, target_type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, modification_target: str = None, use_msa: bool = False) -> dict:
     """
     Generate YAML content for a small molecule binder with multiple targets and create the YAML file.
     
@@ -245,39 +286,8 @@ def generate_yaml_for_taget_binder(name:str, type: str, targets: list, config=""
     Returns:
         tuple: YAML content dictionary and output path
     """ 
-    # Build chain dictionary
-    chain_dict = {binder_id: {'type': 'protein', 'sequence': 'X' * 100}}
 
-    # Map target types to their YAML representation
-    type_map = {
-        'protein': {'type': 'protein', 'sequence': True, 'msa': 'empty'},
-        'small_molecule': {'type': 'ligand', 'smiles': True},
-        'metal': {'type': 'ligand', 'ccd': True},
-        'dna': {'type': 'dna', 'sequence': True},
-        'rna': {'type': 'rna', 'sequence': True}
-    }
-
-    # Add targets with sequential IDs
-    yaml_target_ids = []
-    for i, target in enumerate(targets):
-        # Generate target_id skipping the binder_id
-        ascii_val = ord('A') + i
-        if ascii_val >= ord(binder_id):
-            ascii_val += 1
-        target_id = chr(ascii_val)
-        yaml_target_ids.append(target_id)
-        target_info = {'id': target_id}
-        type_info = type_map[type]
-        
-        # Add appropriate fields based on target type
-        for field, value in type_info.items():
-            if value is True:
-                target_info[field] = target
-            elif value:
-                target_info[field] = value
-                
-        chain_dict[target_id] = target_info
-
+    chain_dict, yaml_target_ids = build_chain_dict(targets, target_type, binder_id, constraints, modifications, modification_target)
     # Build sequences list for YAML
     sequences = []
     for chain_id, info in chain_dict.items():
