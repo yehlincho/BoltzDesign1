@@ -53,6 +53,15 @@ python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D 
 
 If you want to disable af3 cross validation add flag --run_alphafold False
 
+
+## 🎥 Trajectory Visualization
+We installed trajectory visualization based on LogMD
+(https://github.com/log-md/logmd, implemented for Boltz diffusion trajectory https://colab.research.google.com/drive/1-9GXUPna4T0VFlDz9I64gzRQz259_G8f?usp=sharing#scrollTo=4eXNO1JJHYrB)
+
+If you want to enable visualization of the trajectory, you need to set --save_trajectory True. However, be cautious that if you are just optimizing with distogram (--distogram_only True), it will take more time since it also runs the diffusion modules to get actual xyz coordinates.
+
+---
+
 ## ⚙️ Design Configuration
 
 Configure your molecular design parameters:
@@ -112,6 +121,8 @@ After running the pipeline in `boltzdesign.py`, high-confidence designs can be f
 `your_output_folder/ligandmpnn_cutoff_(interface threshold)/03_af_pdb_success`
 
 The designs are saved along with `high_iptm_confidence_scores.csv`, which contains the iPTM and pLDDT scores for each design.
+
+---
 
 ## 📋 Development Roadmap
 
