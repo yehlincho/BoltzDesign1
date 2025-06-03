@@ -53,7 +53,7 @@ python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D 
 
 If you want to disable af3 cross validation add flag --run_alphafold False
 
-# 🔧 Additionally, you may need to optimize parameters for your binder/target:
+### 🔧 Additionally, you may need to optimize parameters for your binder/target:
 - If binder does not form a highly compact structure, increase num_intra_contacts e.g. (default) 2 -> 4
 - If target does not form interaction with binder, increase num_inter_contacts e.g. (default) 2 -> 4
 - If generated binders have all alpha helices and you want to design beta sheets, change e.g. helix_loss_max 0.0, helix_loss_min = -0.3 to helix_loss_max -0.3, helix_loss_min = -0.6
