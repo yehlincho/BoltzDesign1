@@ -3,7 +3,7 @@
 **BoltzDesign1** is a molecular design tool powered by the Boltz model for designing protein-protein interactions and biomolecular complexes.
 
 > 📄 **Paper**: [BoltzDesign1: AI-Powered Molecular Design](https://www.biorxiv.org/content/10.1101/2025.04.06.647261v1)  
-> 🚀 **Colab**: *Coming Soon*
+> 🚀 **Colab**: https://colab.research.google.com/github/yehlincho/BoltzDesign1/blob/main/Boltzdesign1.ipynb
 
 ---
 
