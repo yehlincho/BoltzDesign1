@@ -159,11 +159,25 @@ Examples:
     parser.add_argument('--num_intra_contacts', type=int, default=2,
                         help='Number of intra-chain contacts')
     
-    # Helix loss parameters
+
+    # loss parameters
+    parser.add_argument('--con_loss', type=float, default=1.0,
+                        help='Contact loss weight')
+    parser.add_argument('--i_con_loss', type=float, default=1.0,
+                        help='Inter-chain contact loss weight')
+    parser.add_argument('--plddt_loss', type=float, default=0.1,
+                        help='pLDDT loss weight')
+    parser.add_argument('--pae_loss', type=float, default=0.4,
+                        help='PAE loss weight')
+    parser.add_argument('--i_pae_loss', type=float, default=0.1,
+                        help='Inter-chain PAE loss weight')
+    parser.add_argument('--rg_loss', type=float, default=0.0,
+                        help='Radius of gyration loss weight')
     parser.add_argument('--helix_loss_max', type=float, default=0.0,
                         help='Maximum helix loss weights')
     parser.add_argument('--helix_loss_min', type=float, default=-0.3,
                         help='Minimum helix loss weights')
+
     
     # LigandMPNN parameters
     parser.add_argument('--num_designs', type=int, default=2,
@@ -259,8 +273,10 @@ def load_boltz_model(checkpoint_path, device):
 
 def load_design_config(target_type, work_dir):
     """Load design configuration based on target type"""
-    if target_type in ('small_molecule', 'metal'):
+    if target_type == 'small_molecule':
         config_path = f"{work_dir}/boltzdesign/configs/default_sm_config.yaml"
+    elif target_type == 'metal':
+        config_path = f"{work_dir}/boltzdesign/configs/default_metal_config.yaml"
     elif target_type in ('dna', 'rna'):
         config_path = f"{work_dir}/boltzdesign/configs/default_na_config.yaml"
     elif target_type == 'protein':
@@ -343,12 +359,12 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
     print("Starting Boltz design step...")
     
     loss_scales = {
-        'con_loss': 1.0,
-        'i_con_loss': 1.0,
-        'plddt_loss': 0.1,
-        'pae_loss': 0.4,
-        'i_pae_loss': 0.1,
-        'rg_loss': 0.0,
+        'con_loss': args.con_loss,
+        'i_con_loss': args.i_con_loss,
+        'plddt_loss': args.plddt_loss,
+        'pae_loss': args.pae_loss,
+        'i_pae_loss': args.i_pae_loss,
+        'rg_loss': args.rg_loss,
     }
     
     boltz_path = shutil.which("boltz")
@@ -372,10 +388,9 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
     
     print("Boltz design step completed!")
 
-def run_ligandmpnn_step(args, main_dir, version_name, yaml_dir, work_dir):
+def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, work_dir):
     """Run the LigandMPNN redesign step"""
     print("Starting LigandMPNN redesign step...")
-    
     # Setup LigandMPNN config
     yaml_path = f"{work_dir}/LigandMPNN/run_ligandmpnn_logits_config.yaml"
     with open(yaml_path, "r") as f:
@@ -394,7 +409,6 @@ def run_ligandmpnn_step(args, main_dir, version_name, yaml_dir, work_dir):
     # Setup directories
     boltzdesign_dir = f"{main_dir}/{version_name}/results_final"
     pdb_save_dir = f"{main_dir}/{version_name}/pdb"
-    ligandmpnn_dir = f"{main_dir}/{version_name}/ligandmpnn_cutoff_{args.cutoff}"
     
     lmpnn_redesigned_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned')
     lmpnn_redesigned_fa_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned_fa')
@@ -663,18 +677,17 @@ def modification_to_wt_aa(modifications, modifications_wt):
 
 def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
     """Run the pipeline steps based on arguments"""
-    results = {'ligandmpnn_dir': None, 'af_output_dir': None, 'af_output_apo_dir': None}
+    results = {'ligandmpnn_dir': f"{output_dir['main_dir']}/{output_dir['version']}/ligandmpnn_cutoff_{args.cutoff}", 'af_output_dir': None, 'af_output_apo_dir': None, 'af_pdb_dir': None, 'af_pdb_dir_apo': None}
     
     if args.run_boltz_design:
         run_boltz_design_step(args, config, boltz_model, yaml_dir, 
                             output_dir['main_dir'], output_dir['version'])
-    
+
     if args.run_ligandmpnn:
-        results['ligandmpnn_dir'] = run_ligandmpnn_step(
+        run_ligandmpnn_step(
             args, output_dir['main_dir'], output_dir['version'], 
-            yaml_dir, args.work_dir or os.getcwd()
+            results['ligandmpnn_dir'], yaml_dir, args.work_dir or os.getcwd()
         )
-    
     if args.run_alphafold:
         mod_to_wt_aa = modification_to_wt_aa(args.modifications, args.modifications_wt)
         results['af_output_dir'], results['af_output_apo_dir'], results['af_pdb_dir'], results['af_pdb_dir_apo'] = run_alphafold_step(
