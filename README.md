@@ -49,7 +49,7 @@ python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D 
 - `--alphafold_dir`: Path to your AlphaFold3 installation (default: ~/alphafold3)
 - `--af3_docker_name`: Name of your AlphaFold3 Docker container
 - `--af3_database_settings`: Path to AlphaFold3 database
-- `--af3_conda_env`: Name of your AlphaFold3 conda environment
+- `--af3_hmmer_path`: Path to HMMER
 
 If you want to disable af3 cross validation add flag --run_alphafold False
 
