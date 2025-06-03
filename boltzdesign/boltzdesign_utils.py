@@ -34,7 +34,6 @@ import logging
 logging.basicConfig(level=logging.WARNING)
 
 def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
-    print(output.keys())
     output_dir = os.path.join(folder_dir, f"boltz_results_{name}", "predictions", name)
 
     os.makedirs(output_dir, exist_ok=True)
