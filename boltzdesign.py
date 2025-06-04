@@ -126,6 +126,8 @@ Examples:
                         help='Hard iteration steps')
     parser.add_argument('--semi_greedy_steps', type=int, default=2,
                         help='Semi-greedy steps')
+    parser.add_argument('--recycling_steps', type=int, default=0,
+                        help='Recycling steps')
     
     # Advanced configuration
     parser.add_argument('--use_default_config', type=str2bool, default=True,
@@ -255,10 +257,10 @@ class YamlConfig:
             directory.mkdir(parents=True, exist_ok=True)
 
 
-def load_boltz_model(checkpoint_path, device):
+def load_boltz_model(args, device):
     """Load Boltz model"""
     predict_args = {
-        "recycling_steps": 1,
+        "recycling_steps": args.recycling_steps,
         "sampling_steps": 200,
         "diffusion_samples": 1,
         "write_confidence_summary": True,
@@ -266,7 +268,7 @@ def load_boltz_model(checkpoint_path, device):
         "write_full_pde": False,
     }
     
-    boltz_model = get_boltz_model(checkpoint_path, predict_args, device)
+    boltz_model = get_boltz_model(args.boltz_checkpoint, predict_args, device)
     boltz_model.train()
     return boltz_model, predict_args
 
@@ -346,6 +348,7 @@ def update_config_with_args(config, args):
         'hard_iteration': args.hard_iteration,
         'semi_greedy_steps': args.semi_greedy_steps,
         'msa_max_seqs': args.msa_max_seqs,
+        'recycling_steps': args.recycling_steps,
     }
 
     for param_name, param_value in advanced_params.items():
@@ -597,8 +600,7 @@ def assign_chain_ids(target_ids_list, binder_chain='A'):
 def initialize_pipeline(args):
     """Initialize models and configurations"""
     work_dir = args.work_dir or os.getcwd()
-    boltz_model, _ = load_boltz_model(args.boltz_checkpoint, 
-                                               torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
+    boltz_model, _ = load_boltz_model(args, torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
     
     config_obj = YamlConfig(main_dir=f'{work_dir}/inputs/test_data/{args.target_name}_binder')
     config_obj.setup_directories()
