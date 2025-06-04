@@ -45,6 +45,9 @@ python boltzdesign.py --target_name 7v11 --target_type small_molecule --target_m
 Example for DNA/RNA PDB design:
 python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D --gpu_id 0 --design_samples 5 --suffix 1
 
+If you want to use your custom PDB file:
+python boltzdesign.py --target_name 7v11 --pdb_path your_pdb_path --target_type small_molecule --target_mols OQO --gpu_id 0 --design_samples 2 --suffix own
+
 ⚠️ **Warning**: To run the AlphaFold3 cross-validation pipeline, you need to specify your AlphaFold3 directory, Docker name, database settings, and conda environment in the configuration. These can be set using the following arguments:
 - `--alphafold_dir`: Path to your AlphaFold3 installation (default: ~/alphafold3)
 - `--af3_docker_name`: Name of your AlphaFold3 Docker container

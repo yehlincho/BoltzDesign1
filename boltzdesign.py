@@ -74,6 +74,8 @@ Examples:
                         default='protein', help='Type of target molecule')
     parser.add_argument('--input_type', type=str, choices=['pdb', 'custom'], default='pdb',
                         help='Input type: pdb code or custom input')
+    parser.add_argument('--pdb_path', type=str, default='',
+                        help='Path to a local PDB file (if specify use custom pdb, else fetch from RCSB)')
     parser.add_argument('--pdb_target_ids', type=str, default='',
                         help='Target PDB IDs (comma-separated, e.g., "C,D")')
     parser.add_argument('--target_mols', type=str, default='',
@@ -272,17 +274,26 @@ def load_boltz_model(args, device):
     boltz_model.train()
     return boltz_model, predict_args
 
-
 def load_design_config(target_type, work_dir):
-    """Load design configuration based on target type"""
-    if target_type == 'small_molecule':
-        config_path = f"{work_dir}/boltzdesign/configs/default_sm_config.yaml"
-    elif target_type == 'metal':
-        config_path = f"{work_dir}/boltzdesign/configs/default_metal_config.yaml"
-    elif target_type in ('dna', 'rna'):
-        config_path = f"{work_dir}/boltzdesign/configs/default_na_config.yaml"
-    elif target_type == 'protein':
-        config_path = f"{work_dir}/boltzdesign/configs/default_ppi_config.yaml"
+    """
+    Load design configuration based on target type.
+    Modified so that config files are always loaded from the script's directory,
+    instead of using work_dir/boltzdesign/configs.
+    """
+    # Determine the directory where this script (boltzdesign.py) lives:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # The configs directory is under script_dir/boltzdesign/configs/
+    config_dir = os.path.join(script_dir, 'boltzdesign', 'configs')
+    
+    if target_type=='small_molecule':
+        config_path = os.path.join(config_dir, "default_sm_config.yaml")
+    elif target_type=='metal':
+        config_path = os.path.join(config_dir, "default_metal_config.yaml")
+    elif target_type=='dna' or target_type=='rna':
+        config_path = os.path.join(config_dir, "default_na_config.yaml")
+
+    elif target_type=='protein':
+        config_path = os.path.join(config_dir, "default_ppi_config.yaml")
     else:
         raise ValueError(f"Unknown target type: {target_type}")
     
@@ -602,7 +613,7 @@ def initialize_pipeline(args):
     work_dir = args.work_dir or os.getcwd()
     boltz_model, _ = load_boltz_model(args, torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
     
-    config_obj = YamlConfig(main_dir=f'{work_dir}/inputs/test_data/{args.target_name}_binder')
+    config_obj = YamlConfig(main_dir=f'{work_dir}/inputs/{args.target_type}_{args.target_name}_{args.suffix}')
     config_obj.setup_directories()
     return boltz_model, config_obj
 
@@ -619,8 +630,17 @@ def generate_yaml_config(args, config_obj):
     if args.input_type == "pdb":
         pdb_target_ids = [str(x.strip()) for x in args.pdb_target_ids.split(",")] if args.pdb_target_ids else None
         target_mols = [str(x.strip()) for x in args.target_mols.split(",")] if args.target_mols else None
-        download_pdb(args.target_name, config_obj.PDB_DIR)
-        pdb_path = config_obj.PDB_DIR / f"{args.target_name}.pdb"
+        
+        if args.pdb_path:
+            pdb_path = Path(args.pdb_path)
+            print("load local pdb from", pdb_path)
+            if not pdb_path.is_file():
+                raise FileNotFoundError(f"Could not find local PDB: {args.pdb_path}")
+        else:
+            print("fetch pdb from RCSB")
+            download_pdb(args.target_name, config_obj.PDB_DIR)
+            pdb_path = config_obj.PDB_DIR / f"{args.target_name}.pdb"
+
         if args.target_type in ['rna', 'dna']:
             nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
             for target_id in pdb_target_ids:
@@ -651,7 +671,6 @@ def generate_yaml_config(args, config_obj):
         modification_target=modifications['target'] if modifications else None,
         use_msa=args.use_msa
     )
-
 
 def setup_pipeline_config(args):
     """Setup pipeline configuration"""
