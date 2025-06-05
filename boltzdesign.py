@@ -500,6 +500,28 @@ def filter_high_confidence_designs(args, ligandmpnn_dir, lmpnn_redesigned_dir, l
         sys.exit(1)
 
 
+def calculate_holo_apo_rmsd(af_pdb_dir, af_pdb_dir_apo, binder_chain):
+    """Calculate RMSD between holo and apo structures and update confidence CSV.
+    
+    Args:
+        af_pdb_dir (str): Directory containing holo PDB files
+        af_pdb_dir_apo (str): Directory containing apo PDB files
+    """
+    confidence_csv_path = af_pdb_dir + '/high_iptm_confidence_scores.csv'
+    if os.path.exists(confidence_csv_path):
+        df_confidence_csv = pd.read_csv(confidence_csv_path)
+        for pdb_name in os.listdir(af_pdb_dir):
+            if pdb_name.endswith('.pdb'):
+                pdb_path = os.path.join(af_pdb_dir, pdb_name)
+                pdb_path_apo = os.path.join(af_pdb_dir_apo, pdb_name)
+                xyz_holo, _ = get_CA_and_sequence(pdb_path, chain_id=binder_chain)
+                xyz_apo, _ = get_CA_and_sequence(pdb_path_apo, chain_id='A')
+                rmsd = np_rmsd(np.array(xyz_holo), np.array(xyz_apo))
+                df_confidence_csv.loc[df_confidence_csv['file'] == pdb_name.split('.pdb')[0]+'.cif', 'rmsd'] = rmsd
+                print(f"{pdb_path} rmsd: {rmsd}")
+        df_confidence_csv.to_csv(confidence_csv_path, index=False)
+        
+        
 def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
     """Run AlphaFold validation step"""
     print("Starting AlphaFold validation step...")
@@ -563,6 +585,8 @@ def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
         print("No successful designs from AlphaFold")
         sys.exit(1)
     convert_cif_files_to_pdb(af_output_apo_dir, af_pdb_dir_apo, af_dir=True)
+    calculate_holo_apo_rmsd(af_pdb_dir, af_pdb_dir_apo, args.binder_id)
+
     return af_output_dir, af_output_apo_dir, af_pdb_dir, af_pdb_dir_apo
 
 def run_rosetta_step(args, ligandmpnn_dir, af_output_dir, af_output_apo_dir, af_pdb_dir, af_pdb_dir_apo):
@@ -630,7 +654,6 @@ def generate_yaml_config(args, config_obj):
     if args.input_type == "pdb":
         pdb_target_ids = [str(x.strip()) for x in args.pdb_target_ids.split(",")] if args.pdb_target_ids else None
         target_mols = [str(x.strip()) for x in args.target_mols.split(",")] if args.target_mols else None
-        
         if args.pdb_path:
             pdb_path = Path(args.pdb_path)
             print("load local pdb from", pdb_path)
