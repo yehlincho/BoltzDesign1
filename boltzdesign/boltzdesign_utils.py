@@ -1130,8 +1130,9 @@ def run_boltz_design(
                 target_binder_input = yaml_path.stem
                 for itr in range(design_samples):
                     config['length'] = random.randint(config['length_min'],config['length_max'])
+                    filtered_config['length'] = config['length']
                     loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
-
+                    
                     print('pre-run warm up')
                     input_res_type, plots, loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list = boltz_hallucination(
                         boltz_model,
