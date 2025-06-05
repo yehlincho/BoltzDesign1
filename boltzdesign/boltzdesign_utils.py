@@ -1132,12 +1132,7 @@ def run_boltz_design(
                     config['length'] = random.randint(config['length_min'],config['length_max'])
                     filtered_config['length'] = config['length']
                     loss_scales['helix_loss'] = random.uniform(config['helix_loss_min'], config['helix_loss_max'])
-<<<<<<< HEAD
-                    
-=======
-                    filtered_config['length'] = config['length']
 
->>>>>>> 2d4fdd5653df1b6abde2d63730ffffd3f9a0f324
                     print('pre-run warm up')
                     input_res_type, plots, loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list = boltz_hallucination(
                         boltz_model,
