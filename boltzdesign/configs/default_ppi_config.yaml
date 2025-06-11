@@ -33,3 +33,4 @@ soft_iteration_2: 50
 temp_iteration: 45
 use_temp: true
 recycling_steps: 0
+noise_scaling: 0.1
