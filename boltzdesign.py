@@ -77,13 +77,13 @@ Examples:
     parser.add_argument('--pdb_path', type=str, default='',
                         help='Path to a local PDB file (if specify use custom pdb, else fetch from RCSB)')
     parser.add_argument('--pdb_target_ids', type=str, default='',
-                        help='Target PDB IDs (comma-separated, e.g., "C,D")')
+                        help='Target PDB Chain IDs (comma-separated, e.g., "C,D")')
     parser.add_argument('--target_mols', type=str, default='',
                         help='Target molecules for small molecules (comma-separated, e.g., "SAM,FAD")')
     parser.add_argument('--custom_target_input', type=str, default='',
                         help='Custom target sequences/ligand(smiles)/dna/rna/metals (comma-separated, e.g., "ATAT,GCGC", "[O-]C(=O)C(N)CC[S+](C)CC3OC(n2cnc1c(ncnc12)N)C(O)C3O", "ZN")')
     parser.add_argument('--custom_target_ids', type=str, default='',
-                        help='Custom target IDs (comma-separated, e.g., "A,B")')
+                        help='Custom target Chain IDs (comma-separated, e.g., "A,B")')
     parser.add_argument('--binder_id', type=str, default='A',
                         help='Binder chain ID')
     parser.add_argument('--use_msa', type=str2bool, default=False,
@@ -99,13 +99,13 @@ Examples:
     parser.add_argument('--modifications_wt', type=str, default='',
                         help='Modifications (comma-separated, e.g., "S,S")')
     parser.add_argument('--modifications_positions', type=str, default='',
-                        help='Modification positions (comma-separated, matching order)')
+                        help='Target modification residue positions (comma-separated, matching order)')
     parser.add_argument('--modification_target', type=str, default='',
-                        help='Target ID for modifications (e.g., "A")')
+                        help='Target chain ID for modifications (e.g., "A")')
     
     # Constraints
     parser.add_argument('--constraint_target', type=str, default='',
-                        help='Target ID for constraints (e.g., "A")')
+                        help='Target chain ID for constraints (e.g., "A")')
     parser.add_argument('--contact_residues', type=str, default='',
                         help='Contact residues for constraints (comma-separated, e.g., "99,100,109")')
 
@@ -211,10 +211,10 @@ Examples:
         help='Path to CCD file')
     parser.add_argument('--alphafold_dir', type=str,
         default='~/alphafold3',
-        help='AlphaFold directory')
+        help='AlphaFold3 directory')
     parser.add_argument('--af3_docker_name', type=str,
         default='alphafold3',
-        help='Docker name')
+        help='AlphaFold3 docker name')
     parser.add_argument('--af3_database_settings', type=str,
         default='~/alphafold3/alphafold3_data_save',
         help='AlphaFold3 database settings')
