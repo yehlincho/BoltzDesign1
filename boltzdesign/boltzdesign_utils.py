@@ -995,13 +995,11 @@ def boltz_hallucination(
     for step in range(semi_greedy_steps):
         confidence_score = []
         mutated_sequence_ls = []
-        
         for t in range(10):
             plddt = output['plddt'][best_batch['entity_id']==chain_to_number[binder_chain]]
             i_prob = np.ones(length) if plddt is None else torch.maximum(1-plddt,torch.tensor(0))
             i_prob = i_prob.detach().cpu().numpy() if torch.is_tensor(i_prob) else i_prob
-            sequence = ''.join([alphabet[i] for i in torch.argmax(best_batch['res_type'][best_batch['entity_id']==chain_to_number[binder_chain],:], dim=-1).detach().cpu().numpy()])
-            mutated_sequence = _mutate(sequence, best_logits, i_prob)
+            mutated_sequence = _mutate(prev_sequence, best_logits, i_prob)
             data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = mutated_sequence
             best_batch, _, _, _ = _update_batches(data, data_apo)
             output = _run_model(boltz_model, best_batch, predict_args)
