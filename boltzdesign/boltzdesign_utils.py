@@ -495,6 +495,8 @@ def boltz_hallucination(
         "write_full_pde": False,
     }
 
+    boltz_model.predict_args = predict_args
+
     with yaml_path.open("r") as file:
         data = yaml.safe_load(file)
 
@@ -896,8 +898,11 @@ def boltz_hallucination(
             batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list= design(batch, iters=soft_iteration, soft = 0.0, e_soft=0.0, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts, save_trajectory=save_trajectory)
 
     def _run_model(boltz_model, batch, predict_args):
-        boltz_model.predict_args = predict_args
-        return boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
+        with torch.no_grad():
+            boltz_model.predict_args = predict_args
+            output = boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
+        torch.cuda.empty_cache()
+        return output
 
     def visualize_results(plots):
         # Plot distogram predictions
