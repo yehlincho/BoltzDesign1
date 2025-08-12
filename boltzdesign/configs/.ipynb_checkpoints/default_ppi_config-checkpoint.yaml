@@ -14,13 +14,13 @@ inter_chain_cutoff: 20.0
 intra_chain_cutoff: 14.0
 learning_rate: 0.1
 learning_rate_pre: 1.0
-length_max: 170
+length_max: 170r
 length_min: 90
 mask_ligand: false
 msa_max_seqs: 4096
 non_protein_target: false
 num_inter_contacts: 2
-num_intra_contacts: 4
+num_intra_contacts: 2
 optimize_contact_per_binder_pos: true
 optimizer_type: SGD
 pocket_conditioning: true
@@ -32,4 +32,5 @@ soft_iteration_1: 50
 soft_iteration_2: 50
 temp_iteration: 45
 use_temp: true
-recycling_steps: 0
+recycling_steps: 1
+noise_scaling: 0.1
