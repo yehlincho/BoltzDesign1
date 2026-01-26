@@ -14,7 +14,7 @@ inter_chain_cutoff: 20.0
 intra_chain_cutoff: 14.0
 learning_rate: 0.1
 learning_rate_pre: 1.0
-length_max: 170r
+length_max: 170
 length_min: 90
 mask_ligand: false
 msa_max_seqs: 4096
