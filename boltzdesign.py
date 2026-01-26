@@ -15,7 +15,11 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=DeprecationWarning)
-sys.path.append(f'{os.getcwd()}/boltzdesign')
+
+# Determine the directory where this script (boltzdesign.py) lives:
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+sys.path.append(f"{script_dir}/boltzdesign")
 
 from boltzdesign_utils import *
 from ligandmpnn_utils import *
@@ -280,8 +284,6 @@ def load_design_config(target_type, work_dir):
     Modified so that config files are always loaded from the script's directory,
     instead of using work_dir/boltzdesign/configs.
     """
-    # Determine the directory where this script (boltzdesign.py) lives:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
     # The configs directory is under script_dir/boltzdesign/configs/
     config_dir = os.path.join(script_dir, 'boltzdesign', 'configs')
     
@@ -406,13 +408,13 @@ def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, 
     """Run the LigandMPNN redesign step"""
     print("Starting LigandMPNN redesign step...")
     # Setup LigandMPNN config
-    yaml_path = f"{work_dir}/LigandMPNN/run_ligandmpnn_logits_config.yaml"
+    yaml_path = f"{script_dir}/LigandMPNN/run_ligandmpnn_logits_config.yaml"
     with open(yaml_path, "r") as f:
         mpnn_config = yaml.safe_load(f)
-    
+
     for key, value in mpnn_config.items():
         if isinstance(value, str) and "${CWD}" in value:
-            mpnn_config[key] = value.replace("${CWD}", work_dir)
+            mpnn_config[key] = value.replace("${CWD}", script_dir)
     
     if not Path(mpnn_config["checkpoint_soluble_mpnn"]).exists():
         raise FileNotFoundError("LigandMPNN checkpoint file not found!")
