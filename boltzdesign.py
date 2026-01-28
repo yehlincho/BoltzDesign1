@@ -74,16 +74,19 @@ Examples:
                         default='protein', help='Type of target molecule')
     parser.add_argument('--input_type', type=str, choices=['pdb', 'custom'], default='pdb',
                         help='Input type: pdb code or custom input')
+    
+    ####### NEED EDIT HERE ####### (EDIT TO ADD): Modify to accept a list of paths or a directory (e.g. nargs='+' or type=list)
     parser.add_argument('--pdb_path', type=str, default='',
                         help='Path to a local PDB file (if specify use custom pdb, else fetch from RCSB)')
+                        
     parser.add_argument('--pdb_target_ids', type=str, default='',
-                        help='Target PDB Chain IDs (comma-separated, e.g., "C,D")')
+                        help='Target PDB IDs (comma-separated, e.g., "C,D")')
     parser.add_argument('--target_mols', type=str, default='',
                         help='Target molecules for small molecules (comma-separated, e.g., "SAM,FAD")')
     parser.add_argument('--custom_target_input', type=str, default='',
                         help='Custom target sequences/ligand(smiles)/dna/rna/metals (comma-separated, e.g., "ATAT,GCGC", "[O-]C(=O)C(N)CC[S+](C)CC3OC(n2cnc1c(ncnc12)N)C(O)C3O", "ZN")')
     parser.add_argument('--custom_target_ids', type=str, default='',
-                        help='Custom target Chain IDs (comma-separated, e.g., "A,B")')
+                        help='Custom target IDs (comma-separated, e.g., "A,B")')
     parser.add_argument('--binder_id', type=str, default='A',
                         help='Binder chain ID')
     parser.add_argument('--use_msa', type=str2bool, default=False,
@@ -99,13 +102,13 @@ Examples:
     parser.add_argument('--modifications_wt', type=str, default='',
                         help='Modifications (comma-separated, e.g., "S,S")')
     parser.add_argument('--modifications_positions', type=str, default='',
-                        help='Target modification residue positions (comma-separated, matching order)')
+                        help='Modification positions (comma-separated, matching order)')
     parser.add_argument('--modification_target', type=str, default='',
-                        help='Target chain ID for modifications (e.g., "A")')
+                        help='Target ID for modifications (e.g., "A")')
     
     # Constraints
     parser.add_argument('--constraint_target', type=str, default='',
-                        help='Target chain ID for constraints (e.g., "A")')
+                        help='Target ID for constraints (e.g., "A")')
     parser.add_argument('--contact_residues', type=str, default='',
                         help='Contact residues for constraints (comma-separated, e.g., "99,100,109")')
 
@@ -211,10 +214,10 @@ Examples:
         help='Path to CCD file')
     parser.add_argument('--alphafold_dir', type=str,
         default='~/alphafold3',
-        help='AlphaFold3 directory')
+        help='AlphaFold directory')
     parser.add_argument('--af3_docker_name', type=str,
         default='alphafold3',
-        help='AlphaFold3 docker name')
+        help='Docker name')
     parser.add_argument('--af3_database_settings', type=str,
         default='~/alphafold3/alphafold3_data_save',
         help='AlphaFold3 database settings')
@@ -654,8 +657,10 @@ def generate_yaml_config(args, config_obj):
     if args.input_type == "pdb":
         pdb_target_ids = [str(x.strip()) for x in args.pdb_target_ids.split(",")] if args.pdb_target_ids else None
         target_mols = [str(x.strip()) for x in args.target_mols.split(",")] if args.target_mols else None
+        
+        ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic below handles a single file path. Needs loop for multiple PDBs.
         if args.pdb_path:
-            pdb_path = Path(args.pdb_path)
+            pdb_path = Path(args.pdb_path) 
             print("load local pdb from", pdb_path)
             if not pdb_path.is_file():
                 raise FileNotFoundError(f"Could not find local PDB: {args.pdb_path}")
@@ -665,15 +670,18 @@ def generate_yaml_config(args, config_obj):
             pdb_path = config_obj.PDB_DIR / f"{args.target_name}.pdb"
 
         if args.target_type in ['rna', 'dna']:
+            ####### NEED EDIT HERE ####### (EDIT TO ADD): If loop added above, call this for each PDB and aggregate sequences
             nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
             for target_id in pdb_target_ids:
                 target.append(nucleotide_dict[target_id]['seq'])
         elif args.target_type == 'small_molecule':
+            ####### NEED EDIT HERE ####### (EDIT TO ADD): Ensure this handles multiple structures if needed
             ligand_dict = get_ligand_from_pdb(args.target_name)
             for target_mol in target_mols:
                 print(target_mol, ligand_dict.keys())
                 target.append(ligand_dict[target_mol])
         elif args.target_type == 'protein':
+            ####### NEED EDIT HERE ####### (EDIT TO ADD): If loop added above, call this for each PDB and aggregate sequences
             chain_sequences = get_chains_sequence(pdb_path)
             for target_id in pdb_target_ids:
                 target.append(chain_sequences[target_id])
@@ -683,6 +691,7 @@ def generate_yaml_config(args, config_obj):
         target_inputs = [str(x.strip()) for x in args.custom_target_input.split(",")] if args.custom_target_input else []
         target = target_inputs or [args.target_name]
 
+    ####### NEED EDIT HERE ####### (EDIT TO ADD): The 'target' variable passed here needs to contain data for all input structures
     return generate_yaml_for_target_binder(
         args.target_name, 
         args.target_type,
