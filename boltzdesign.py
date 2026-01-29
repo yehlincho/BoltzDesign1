@@ -75,7 +75,7 @@ Examples:
     parser.add_argument('--input_type', type=str, choices=['pdb', 'custom'], default='pdb',
                         help='Input type: pdb code or custom input')
     
-    ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic allows for colon-separated paths in parsing
+    # Logic allows for colon-separated paths in parsing
     parser.add_argument('--pdb_path', type=str, default='',
                         help='Path to local PDB file(s). For multiple inputs, separate with colon (e.g. path1.pdb:path2.pdb)')
                         
@@ -663,7 +663,7 @@ def generate_yaml_config(args, config_obj):
         pdb_target_ids = [str(x.strip()) for x in args.pdb_target_ids.split(",")] if args.pdb_target_ids else None
         target_mols = [str(x.strip()) for x in args.target_mols.split(",")] if args.target_mols else None
         
-        ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic handles list splitting by colon
+        # Logic handles list splitting by colon
         pdb_paths = []
         if args.pdb_path:
             # Check for colon delimiter for multiple PDBs
@@ -688,20 +688,21 @@ def generate_yaml_config(args, config_obj):
             current_target_seqs = []
             
             if args.target_type in ['rna', 'dna']:
-                ####### NEED EDIT HERE ####### (EDIT TO ADD): Sequence extraction inside loop
+                # Sequence extraction inside loop
                 nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
                 for target_id in pdb_target_ids:
                     current_target_seqs.append(nucleotide_dict[target_id]['seq'])
             
             elif args.target_type == 'small_molecule':
-                ####### NEED EDIT HERE ####### (EDIT TO ADD): Small molecule extraction
-                ligand_dict = get_ligand_from_pdb(args.target_name) # Uses name, might need adjustment if relying on PDB file content
+                # Small molecule extraction
+                # Using pdb_path here assuming local file support, otherwise fallback to args.target_name if needed
+                ligand_dict = get_ligand_from_pdb(str(pdb_path) if args.pdb_path else args.target_name)
                 for target_mol in target_mols:
                     print(target_mol, ligand_dict.keys())
                     current_target_seqs.append(ligand_dict[target_mol])
             
             elif args.target_type == 'protein':
-                ####### NEED EDIT HERE ####### (EDIT TO ADD): Protein chain extraction inside loop
+                # Protein chain extraction inside loop
                 chain_sequences = get_chains_sequence(pdb_path)
                 for target_id in pdb_target_ids:
                     current_target_seqs.append(chain_sequences[target_id])
@@ -717,7 +718,7 @@ def generate_yaml_config(args, config_obj):
         # Wrap in a list to maintain consistency with multi-state structure above
         all_targets_data.append(target_inputs or [args.target_name])
 
-    ####### NEED EDIT HERE ####### (EDIT TO ADD): Passing the aggregated list to generator
+    # Passing the aggregated list to generator
     # If all_targets_data has length 1 (single PDB), it behaves as before (list of sequences).
     # If length > 1, generate_yaml_for_target_binder must handle list of lists.
     # Note: We flatten if it's a single PDB to maintain backward compatibility if the utils expect a simple list
