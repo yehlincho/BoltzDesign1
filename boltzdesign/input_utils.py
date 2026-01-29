@@ -268,14 +268,18 @@ def build_chain_dict(targets: list, target_type: str, binder_id: str, constraint
         
     return chain_dict, yaml_target_ids
 
+# Modified to handle multiple target states by checking if input targets is a list of lists.
+# If multiple states are detected, it generates a YAML file for each state (suffixed _0, _1, etc.)
+# Returns the content and path of the first generated file to maintain pipeline compatibility.
 def generate_yaml_for_target_binder(name:str, target_type: str, targets: list, config="", binder_id='A', constraints: dict = None, modifications: dict = None, modification_target: str = None, use_msa: bool = False) -> dict:
     """
     Generate YAML content for a small molecule binder with multiple targets and create the YAML file.
     
+    ```
     Args:
         name (str): Name/PDB code for the target
         type (str): Type of ligand ('small_molecule', 'dna', 'rna', 'metal', 'protein')
-        targets (list): List of target information (SMILES, sequences, or CCD codes)
+        targets (list): List of target information (SMILES, sequences, or CCD codes). Can be list of lists for multi-state.
         binder_id (str): ID of the binder
         config (Config): Configuration object
         constraints (dict): Optional constraints to add to YAML
@@ -286,63 +290,78 @@ def generate_yaml_for_target_binder(name:str, target_type: str, targets: list, c
     Returns:
         tuple: YAML content dictionary and output path
     """ 
-
-    chain_dict, yaml_target_ids = build_chain_dict(targets, target_type, binder_id, constraints, modifications, modification_target)
-    # Build sequences list for YAML
-    sequences = []
-    for chain_id, info in chain_dict.items():
-        if not isinstance(info, dict) or 'type' not in info:
-            continue
-            
-        entry = {}
-        if info['type'] == 'ligand':
-            key = 'smiles' if 'smiles' in info else 'ccd'
-            entry = {
-                "ligand": {
-                    "id": [chain_id],
-                    key: info[key]
-                }
-            }
-        elif info['type'] in ['dna', 'rna']:
-            entry = {
-                info['type']: {
-                    "id": [chain_id],
-                    "sequence": info['sequence']
-                }
-            }
-        else:  # protein
-            msa_path = (config.MSA_DIR / f"{name}_{chain_id}_env/msa.npz" 
-                       if use_msa and not all(x == 'X' for x in info['sequence']) 
-                       else "empty")
-
-            if msa_path != "empty":
-                process_msa(chain_id, info['sequence'], name, config)
-                print(f"Processed MSA for {name} chain {chain_id}")
-            
-            entry = {
-                "protein": {
-                    "id": [chain_id],
-                    "sequence": info['sequence'],
-                    "msa": str(msa_path)
-                }
-            }
-            
-            if modifications and chain_id in yaml_target_ids and chain_id == modification_target:
-                entry["protein"]["modifications"] = modifications
+    
+    is_multi_state = isinstance(targets[0], list)
+    state_targets = targets if is_multi_state else [targets]
+    
+    saved_yaml_content = {}
+    saved_output_path = None
+    
+    for state_idx, current_target_list in enumerate(state_targets):
+        chain_dict, yaml_target_ids = build_chain_dict(current_target_list, target_type, binder_id, constraints, modifications, modification_target)
+        
+        sequences = []
+        for chain_id, info in chain_dict.items():
+            if not isinstance(info, dict) or 'type' not in info:
+                continue
                 
-        sequences.append(entry)
+            entry = {}
+            if info['type'] == 'ligand':
+                key = 'smiles' if 'smiles' in info else 'ccd'
+                entry = {
+                    "ligand": {
+                        "id": [chain_id],
+                        key: info[key]
+                    }
+                }
+            elif info['type'] in ['dna', 'rna']:
+                entry = {
+                    info['type']: {
+                        "id": [chain_id],
+                        "sequence": info['sequence']
+                    }
+                }
+            else:
+                msa_path = "empty"
+                if use_msa and not all(x == 'X' for x in info['sequence']):
+                    msa_path = config.MSA_DIR / f"{name}_{chain_id}_env/msa.npz"
+                
+                if msa_path != "empty":
+                    process_msa(chain_id, info['sequence'], name, config)
+                    print(f"Processed MSA for {name} chain {chain_id} (State {state_idx})")
+                
+                entry = {
+                    "protein": {
+                        "id": [chain_id],
+                        "sequence": info['sequence'],
+                        "msa": str(msa_path)
+                    }
+                }
+                
+                if modifications and chain_id in yaml_target_ids and chain_id == modification_target:
+                    entry["protein"]["modifications"] = modifications
+                    
+            sequences.append(entry)
     
-    # Create and write YAML content
-    yaml_content = {"version": 1, "sequences": sequences}
-    if constraints:
-        yaml_content["constraints"] = [constraints]
-
-    output_path = config.YAML_DIR / f"{name}.yaml"
-    with open(output_path, 'w') as f:
-        yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
-    logger.info(f"Created YAML file for {name}")
+        yaml_content = {"version": 1, "sequences": sequences}
+        if constraints:
+            yaml_content["constraints"] = [constraints]
     
-    return yaml_content, output_path
+        # If multi-state, append index: name_0.yaml, name_1.yaml
+        # If single state, keep original behavior: name.yaml
+        filename = f"{name}_{state_idx}.yaml" if is_multi_state else f"{name}.yaml"
+        output_path = config.YAML_DIR / filename
+        
+        with open(output_path, 'w') as f:
+            yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False)
+        
+        logger.info(f"Created YAML file: {filename}")
+        
+        if state_idx == 0:
+            saved_yaml_content = yaml_content
+            saved_output_path = output_path
+    
+    return saved_yaml_content, saved_output_path
 
     
 def process_msa(chain_id: str, sequence: str, pdb_code: str, config: Config) -> bool:
