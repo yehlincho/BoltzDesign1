@@ -334,86 +334,120 @@ def run_ligandmpnn_redesign(
     for directory in [out_dir, lmpnn_yaml_dir, results_final_dir]:
         os.makedirs(directory, exist_ok=True)
 
-    # Initialize score tracking lists
-    original_score = []
-    ligandpmpnn_redesign_score = []
+    # Collect all PDB paths for multi-state design
+    pdb_paths = sorted([os.path.join(pdb_dir, f) for f in os.listdir(pdb_dir) if f.endswith('.pdb')])
+    if not pdb_paths:
+        print(f"No PDB files found in {pdb_dir}")
+        return
 
-    for pdb_path in os.listdir(pdb_dir):
-        pdb_name = pdb_path.split('.pdb')[0]
-        existing_yamls = list(Path(lmpnn_yaml_dir).glob(f'{pdb_name}_*.yaml'))
-        if existing_yamls:
-            print(f"Skipping {pdb_name} as yaml files already exist")
-            continue
-        else:
-            pdb_path = os.path.join(pdb_dir, pdb_path)
-            if pdb_path.endswith('.pdb'):
-                interface_residues= get_protein_ligand_interface_all_atom(pdb_path, cutoff=cutoff, non_protein_target=non_protein_target, binder_chain=binder_chain, target_chains=target_chains)
-                print("len interface_residues", len(interface_residues))
-                with open(ligandmpnn_config, 'r') as f:
-                    config_dict = yaml.safe_load(f)
+    # Use the first PDB name as the base name for outputs
+    base_pdb_name = os.path.basename(pdb_paths[0]).split('.pdb')[0]
+    
+    # Calculate interface residues for the first structure (approximation for ensemble)
+    # Ideally, one might want the union of interfaces, but using the first is a common heuristic
+    interface_residues = get_protein_ligand_interface_all_atom(
+        pdb_paths[0], cutoff=cutoff, non_protein_target=non_protein_target, 
+        binder_chain=binder_chain, target_chains=target_chains
+    )
+    print(f"len interface_residues (from {base_pdb_name}): {len(interface_residues)}")
 
-                if non_protein_target:
-                    model_type = "ligand_mpnn"
-                else:
-                    model_type = "soluble_mpnn"
+    with open(ligandmpnn_config, 'r') as f:
+        config_dict = yaml.safe_load(f)
 
-                config = SimpleNamespace(**config_dict)
-                config.model_type = model_type
-                config.seed = 111
-                config.pdb_path = pdb_path
-                config.out_folder = out_dir
-                if fix_interface:
-                    config.fixed_residues = " ".join([f'{binder_chain}{item+1}' for item in interface_residues])
-                config.batch_size = 16
-                config.save_stats = 0
-                config.chains_to_design = binder_chain
-                output = main(config)
-                fasta_path = os.path.join(out_dir, 'seqs', f'{pdb_name}.fa')
-                print(fasta_path)
-                # Read the existing fa file
-                with open(fasta_path, 'r') as f:
-                    lines = f.readlines()
-                    sequences = []
-                    sequence_found = False  # Flag to check if sequence is found
-                    for line in lines[2:]:
-                        if line.startswith('>'):
-                            overall_confidence = float(line.split(',')[4].split('=')[1])
-                            ligand_confidence = line.split(',')[5].split('=')[1]
-                            sequences.append((overall_confidence, ligand_confidence, ""))  # Store confidence and ligand
-                            sequence_found = True  # Set flag to true if sequence is found
-                        elif sequence_found:  # Check for the sequence line after finding confidence
-                            sequences[-1] = (sequences[-1][0], sequences[-1][1], line.strip())  # Add the corresponding sequence
-                            sequence_found = False  # Reset flag after capturing the sequence
-                top_sequences = sorted(sequences, key=lambda x: x[0], reverse=True)[:top_k]
-                for idx, (overall_confidence, ligand_confidence, sequence) in enumerate(top_sequences):
-                    matching_yamls = list(Path(yaml_dir).glob(f'{pdb_name.split("_results")[0]}*.yaml'))
-                    if matching_yamls:
-                        yaml_path = str(matching_yamls[0])  # Take the first matching yaml file
-                        with open(yaml_path, 'r') as f:
-                            yaml_data = yaml.safe_load(f)
-                    
-                    # Remove constraints
-                    yaml_data.pop('constraints', None)
-                    
-                    if not non_protein_target:
-                        binder_idx = chain_to_number[binder_chain]
-                        yaml_data['sequences'][binder_idx]['protein']['sequence'] = sequence.split(':')[chain_to_number[binder_chain]]
-                    else:
-                        yaml_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = sequence
+    if non_protein_target:
+        model_type = "ligand_mpnn"
+    else:
+        model_type = "soluble_mpnn"
 
-                    # Replace .npz with .a3m in msa paths
-                    for seq in yaml_data['sequences']:
-                        if 'protein' in seq and 'msa' in seq['protein']:
-                            msa_path = seq['protein']['msa']
-                            if isinstance(msa_path, str) and msa_path.endswith('.npz'):
-                                seq['protein']['msa'] = msa_path.replace('.npz', '.a3m')
+    config = SimpleNamespace(**config_dict)
+    config.model_type = model_type
+    config.seed = 111
+    # Pass list of PDBs for multi-state
+    config.pdb_path_multi = pdb_paths 
+    config.out_folder = out_dir
+    
+    if fix_interface:
+        config.fixed_residues = " ".join([f'{binder_chain}{item+1}' for item in interface_residues])
+    
+    config.batch_size = 16
+    config.save_stats = 0
+    config.chains_to_design = binder_chain
+    
+    # Run LigandMPNN on the ensemble
+    output = main(config)
+    
+    # Process output FASTA
+    # Note: LigandMPNN multi-state output naming might differ, assuming standard naming or using first pdb name
+    # Usually it generates seqs/{pdb_name}.fa. If multi, check documentation/output. 
+    # Assuming it uses the name of the first pdb in the list or a consolidated name.
+    # For safety here, we look for the file that matches the base_pdb_name.
+    fasta_path = os.path.join(out_dir, 'seqs', f'{base_pdb_name}.fa')
+    
+    if not os.path.exists(fasta_path):
+         # If exact match fails, try finding any .fa file in the output seqs folder
+         possible_fastas = list(Path(os.path.join(out_dir, 'seqs')).glob('*.fa'))
+         if possible_fastas:
+             fasta_path = str(possible_fastas[0])
+         else:
+             print(f"Error: No output fasta found at {fasta_path}")
+             return
 
-                    final_yaml_path = os.path.join(lmpnn_yaml_dir, f'{pdb_name}_{idx+1}.yaml')
-                    with open(final_yaml_path, 'w') as f:
-                        yaml.dump(yaml_data, f)
+    print(fasta_path)
+    # Read the existing fa file
+    with open(fasta_path, 'r') as f:
+        lines = f.readlines()
+        sequences = []
+        sequence_found = False  # Flag to check if sequence is found
+        for line in lines[2:]:
+            if line.startswith('>'):
+                try:
+                    overall_confidence = float(line.split(',')[4].split('=')[1])
+                    ligand_confidence = line.split(',')[5].split('=')[1]
+                    sequences.append((overall_confidence, ligand_confidence, ""))  # Store confidence and ligand
+                    sequence_found = True  # Set flag to true if sequence is found
+                except IndexError:
+                     # Handle cases where header format might be slightly different
+                     continue
+            elif sequence_found:  # Check for the sequence line after finding confidence
+                sequences[-1] = (sequences[-1][0], sequences[-1][1], line.strip())  # Add the corresponding sequence
+                sequence_found = False  # Reset flag after capturing the sequence
+    
+    top_sequences = sorted(sequences, key=lambda x: x[0], reverse=True)[:top_k]
+    
+    for idx, (overall_confidence, ligand_confidence, sequence) in enumerate(top_sequences):
+        matching_yamls = list(Path(yaml_dir).glob(f'{base_pdb_name.split("_results")[0]}*.yaml'))
+        
+        if matching_yamls:
+            yaml_path = str(matching_yamls[0])  # Take the first matching yaml file
+            with open(yaml_path, 'r') as f:
+                yaml_data = yaml.safe_load(f)
+            
+            # Remove constraints
+            yaml_data.pop('constraints', None)
+            
+            if not non_protein_target:
+                binder_idx = chain_to_number[binder_chain]
+                # Check bounds
+                if binder_idx < len(yaml_data['sequences']):
+                     yaml_data['sequences'][binder_idx]['protein']['sequence'] = sequence.split(':')[chain_to_number[binder_chain]]
+            else:
+                binder_idx = chain_to_number[binder_chain]
+                if binder_idx < len(yaml_data['sequences']):
+                    yaml_data['sequences'][binder_idx]['protein']['sequence'] = sequence
 
-                    import subprocess
-                    subprocess.run([boltz_path, 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])
-                    print(f"Completed processing {pdb_name} for sequence {idx+1}")
+            # Replace .npz with .a3m in msa paths
+            for seq in yaml_data['sequences']:
+                if 'protein' in seq and 'msa' in seq['protein']:
+                    msa_path = seq['protein']['msa']
+                    if isinstance(msa_path, str) and msa_path.endswith('.npz'):
+                        seq['protein']['msa'] = msa_path.replace('.npz', '.a3m')
+
+            final_yaml_path = os.path.join(lmpnn_yaml_dir, f'{base_pdb_name}_{idx+1}.yaml')
+            with open(final_yaml_path, 'w') as f:
+                yaml.dump(yaml_data, f)
+
+            import subprocess
+            subprocess.run([boltz_path, 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])
+            print(f"Completed processing {base_pdb_name} for sequence {idx+1}")
 
 
