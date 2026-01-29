@@ -1,3 +1,443 @@
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import subprocess
+import pickle
+from dataclasses import asdict, replace
+from pathlib import Path
+from typing import Optional
+import copy
+import random
+from boltz.data import const
+from boltz.data.types import MSA, Connection, Input, Structure, Interface
+from boltz.model.model import Boltz1
+from boltz.main import BoltzDiffusionParams
+from boltz.data.tokenize.boltz import BoltzTokenizer
+from boltz.data.feature.featurizer import BoltzFeaturizer
+from boltz.data.parse.schema import parse_boltz_schema
+from boltz.data.write.mmcif import to_mmcif
+from boltz.data.write.pdb import to_pdb
+import yaml
+import shutil
+from Bio.PDB import PDBParser, MMCIFParser 
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+import csv
+import gc
+import json
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+
+def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
+   output_dir = os.path.join(folder_dir, f"boltz_results_{name}", "predictions", name)
+
+   os.makedirs(output_dir, exist_ok=True)
+   atoms = structure.atoms
+   atoms['coords'] = output['coords'][0].detach().cpu().numpy()[:atoms['coords'].shape[0],:]
+   atoms["is_present"] = True
+   residues = structure.residues
+   residues["is_present"] = True
+   interfaces = np.array([], dtype=Interface)
+   new_structure: Structure = replace(
+       structure,
+       atoms=atoms,
+       residues=residues,
+       interfaces=interfaces,
+   )
+   plddts= output['plddt'].detach().cpu().numpy()[0]       
+   path = Path(output_dir) / f"{name}_model_{model_idx}.cif"
+   with path.open("w") as f:
+       f.write(to_mmcif(new_structure, plddts=plddts))
+
+   # Save confidence summary
+   if "plddt" in output:
+       confidence_summary_dict = {}
+       for key in [
+           "confidence_score",
+           "ptm",
+           "iptm",
+           "ligand_iptm",
+           "protein_iptm",
+           "complex_plddt",
+           "complex_iplddt",
+           "complex_pde",
+           "complex_ipde",
+       ]:
+           if key in output:
+               confidence_summary_dict[key] = output[key].item()
+      
+       if "pair_chains_iptm" in output:
+           confidence_summary_dict["chains_ptm"] = {
+               idx: output["pair_chains_iptm"][idx][idx].item()
+               for idx in output["pair_chains_iptm"]
+           }
+           confidence_summary_dict["pair_chains_iptm"] = {
+               idx1: {
+                   idx2: output["pair_chains_iptm"][idx1][idx2].item()
+                   for idx2 in output["pair_chains_iptm"][idx1]
+               }
+               for idx1 in output["pair_chains_iptm"]
+           }
+
+       json_path = os.path.join(output_dir, f"confidence_{name}_model_{model_idx}.json")
+       with open(json_path, 'w') as f:
+           json.dump(confidence_summary_dict, f, indent=4)
+       # Save plddt
+       plddt = output["plddt"]
+       plddt_path = os.path.join(output_dir, f"plddt_{name}_model_{model_idx}.npz")
+       np.savez_compressed(plddt_path, plddt=plddt.cpu().detach().numpy())
+
+   if "pae" in output:
+       pae = output["pae"]
+       pae_path = os.path.join(output_dir, f"pae_{name}_model_{model_idx}.npz")
+       np.savez_compressed(pae_path, pae=pae.cpu().detach().numpy())
+
+
+tokens = [
+   "<pad>",
+   "-",
+   "ALA",
+   "ARG",
+   "ASN",
+   "ASP",
+   "CYS",
+   "GLN",
+   "GLU",
+   "GLY",
+   "HIS",
+   "ILE",
+   "LEU",
+   "LYS",
+   "MET",
+   "PHE",
+   "PRO",
+   "SER",
+   "THR",
+   "TRP",
+   "TYR",
+   "VAL",
+   "UNK",  # unknown protein token
+   "A",
+   "G",
+   "C",
+   "U",
+   "N",  # unknown rna token
+   "DA",
+   "DG",
+   "DC",
+   "DT",
+   "DN",  # unknown dna token
+]
+
+
+chain_to_number = {
+   'A': 0,
+   'B': 1,
+   'C': 2,
+   'D': 3,
+   'E': 4,
+   'F': 5,
+   'G': 6,
+   'H': 7,
+   'I': 8,
+   'J': 9,
+}
+def visualize_training_history(best_batch, loss_history, sequence_history, distogram_history, length, binder_chain='A', save_dir=None, save_filename=None):
+   """
+   Visualize training history including loss plot, distogram animation, and sequence evolution animation.
+   Args:
+       loss_history (list): List of loss values over training
+       sequence_history (list): List of sequence probability matrices over training
+       distogram_history (list): List of distogram matrices over training
+       length (int): Length of sequence to visualize
+       save_dir (str): Directory to save visualizations
+   """
+
+   mask = (best_batch['entity_id']==chain_to_number[binder_chain]).squeeze(0).detach().cpu().numpy()
+   sequence_history = [seq[mask] for seq in sequence_history]
+
+   if save_dir:
+       os.makedirs(save_dir, exist_ok=True)
+
+
+   def create_distogram_animation():
+       plt.style.use('default')  # Use default white background style
+       fig, ax = plt.subplots(figsize=(6,6))
+       distogram_2d = distogram_history[0]
+       im = ax.imshow(distogram_2d)
+  
+       plt.colorbar(im, ax=ax)
+       ax.set_title('Distogram Evolution')
+
+       def update(frame):
+           distogram_2d = distogram_history[frame]
+           im.set_data(distogram_2d)
+           ax.set_title(f'Distogram Epoch {frame + 1}')
+           return im,
+
+       ani = FuncAnimation(fig, update, frames=len(distogram_history), interval=200)
+       if save_dir:
+           ani.save(os.path.join(save_dir, f'{save_filename}_distogram_evolution.gif'), writer='pillow')
+       plt.close()
+       return ani
+
+   # Create sequence evolution animation
+   def create_sequence_animation():
+       plt.style.use('default')  # Use default white background style
+       fig, ax = plt.subplots(figsize=(12,3.5))
+       im = ax.imshow(sequence_history[0].T, vmin=0, vmax=1, cmap='Blues', aspect='auto', alpha=0.8)
+       plt.colorbar(im, ax=ax)
+       ax.set_yticks(np.arange(20))
+       ax.set_yticklabels(list('ARNDCQEGHILKMFPSTWYV'))
+       ax.set_title('Sequence Evolution')
+
+       def update(frame):
+           im.set_data(sequence_history[frame].T)
+           ax.set_title(f'Sequence Epoch {frame + 1}')
+           return im,
+
+       ani = FuncAnimation(fig, update, frames=len(sequence_history), interval=200)
+       if save_dir:
+           ani.save(os.path.join(save_dir, f'{save_filename}_sequence_evolution.gif'), writer='pillow')
+       plt.close()
+       return ani
+
+   # Create and save animations
+   distogram_ani = create_distogram_animation()
+   sequence_ani = create_sequence_animation()
+
+   return distogram_ani, sequence_ani
+
+def get_mid_points(pdistogram):
+   boundaries = torch.linspace(2, 22.0, 63)
+   lower = torch.tensor([1.0])
+   upper = torch.tensor([22.0 + 5.0])
+   exp_boundaries = torch.cat((lower, boundaries, upper))
+   mid_points = ((exp_boundaries[:-1] + exp_boundaries[1:]) / 2).to(
+       pdistogram.device
+   )
+
+   return mid_points
+
+
+def get_CA_and_sequence(structure_file, chain_id='A'):
+   # Determine file type and use appropriate parser
+   if structure_file.endswith('.cif'):
+       parser = MMCIFParser(QUIET=True)
+   elif structure_file.endswith('.pdb'):
+       parser = PDBParser(QUIET=True)
+   else:
+       raise ValueError("File must be either .cif or .pdb format")
+      
+   structure = parser.get_structure("structure", structure_file)
+   xyz = []
+   sequence = []
+   aa_map = {
+       'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D',
+       'CYS': 'C', 'GLU': 'E', 'GLN': 'Q', 'GLY': 'G',
+       'HIS': 'H', 'ILE': 'I', 'LEU': 'L', 'LYS': 'K',
+       'MET': 'M', 'PHE': 'F', 'PRO': 'P', 'SER': 'S',
+       'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
+   }
+  
+   model = structure[0]  # Get first model (default for most structures)
+  
+   if chain_id in model:
+       chain = model[chain_id]
+       for residue in chain:
+           if "CA" in residue:
+               xyz.append(residue["CA"].coord)
+               sequence.append(aa_map.get(residue.resname, 'X'))
+   else:
+       raise ValueError(f"Chain {chain_id} not found in {structure_file}")
+  
+   return xyz, sequence
+
+
+def np_kabsch(a, b, return_v=False):
+   '''Get alignment matrix for two sets of coordinates using numpy
+  
+   Args:
+       a: First set of coordinates
+       b: Second set of coordinates
+       return_v: If True, return U matrix from SVD. If False, return rotation matrix
+      
+   Returns:
+       Rotation matrix (or U matrix if return_v=True) to align coordinates
+   '''
+   # Calculate covariance matrix
+   ab = np.swapaxes(a, -1, -2) @ b
+  
+   # Singular value decomposition
+   u, s, vh = np.linalg.svd(ab, full_matrices=False)
+  
+   # Handle reflection case
+   flip = np.linalg.det(u @ vh) < 0
+   if flip:
+       u[...,-1] = -u[...,-1]
+  
+   return u if return_v else (u @ vh)
+
+
+def align_points(a, b):
+   a_centroid = a.mean(axis=0)
+   b_centroid = b.mean(axis=0)
+
+   a_centered = a - a_centroid
+   b_centered = b - b_centroid
+
+   R = np_kabsch(a_centered, b_centered)
+   a_aligned = a_centered @ R + b_centroid
+   return a_aligned
+
+
+def np_rmsd(true, pred):
+   '''Compute RMSD of coordinates after alignment using numpy
+  
+   Args:
+       true: Reference coordinates
+       pred: Predicted coordinates to align
+      
+   Returns:
+       Root mean square deviation after optimal alignment
+   '''
+   # Center coordinates
+   p = true - np.mean(true, axis=-2, keepdims=True)
+   q = pred - np.mean(pred, axis=-2, keepdims=True)
+  
+   # Get optimal rotation matrix and apply it
+   p = p @ np_kabsch(p, q)
+  
+   # Calculate RMSD
+   return np.sqrt(np.mean(np.sum(np.square(p-q), axis=-1)) + 1e-8)
+
+  
+def min_k(x, k=1, mask=None):
+   # Convert mask to boolean if it's not None
+   if mask is not None:
+       mask = mask.bool()  # Convert to boolean tensor
+  
+   # Sort the tensor, replacing masked values with Nan
+   y = torch.sort(x if mask is None else torch.where(mask, x, float('nan')))[0]
+
+   # Create a mask for the top k value
+   k_mask = (torch.arange(y.shape[-1]).to(y.device) < k) & (~torch.isnan(y))
+   # Compute the mean of the top k values
+   return torch.where(k_mask, y, 0).sum(-1) / (k_mask.sum(-1) + 1e-8)
+
+
+def get_con_loss(dgram, dgram_bins, num=None, seqsep=None, num_pos = float("inf"), cutoff=None, binary=False, mask_1d=None, mask_1b=None):
+   con_loss = _get_con_loss(dgram, dgram_bins, cutoff, binary)
+   idx = torch.arange(dgram.shape[1])
+   offset = idx[:,None] - idx[None,:]
+   # Add mask for position separation > 3
+   m =(torch.abs(offset)>=seqsep).to(dgram.device)
+   if mask_1d is None: mask_1d = torch.ones(m.shape[0])
+   if mask_1b is None: mask_1b = torch.ones(m.shape[0])
+
+   m = torch.logical_and(m, mask_1b)
+   p = min_k(con_loss, num, m).to(dgram.device)
+   p = min_k(p, num_pos, mask_1d).to(dgram.device)
+   return p
+
+
+def _get_con_loss(dgram, dgram_bins, cutoff=None, binary=False):
+   '''dgram to contacts'''
+   if cutoff is None: cutoff = dgram_bins[-1]
+   bins = dgram_bins < cutoff 
+   px = torch.softmax(dgram, dim=-1)
+   px_ = torch.softmax(dgram - 1e7 * (~ bins), dim=-1)       
+   # binary/categorical cross-entropy
+   con_loss_cat_ent = -(px_ * torch.log_softmax(dgram, dim=-1)).sum(-1)
+   con_loss_bin_ent = -torch.log((bins * px + 1e-8).sum(-1))
+
+   return binary * con_loss_bin_ent + (1 - binary) * con_loss_cat_ent
+
+
+def mask_loss(x, mask=None, mask_grad=False):
+   if mask is None:
+       return x.mean()
+   else:
+       x_masked = (x * mask).sum() / (1e-8 + mask.sum())
+       if mask_grad:
+           return (x.mean() - x_masked).detach() + x_masked
+       else:
+           return x_masked
+
+
+def get_plddt_loss(plddt, mask_1d=None):
+   p = 1 - plddt
+   return mask_loss(p, mask_1d)
+
+
+def get_pae_loss(pae, mask_1d=None, mask_1b=None, mask_2d=None):
+ pae = pae/31.0
+ L = pae.shape[1]
+ if mask_1d is None: mask_1d = torch.ones(L).to(pae.device)
+ if mask_1b is None: mask_1b = torch.ones(L).to(pae.device)
+ if mask_2d is None: mask_2d = torch.ones((L, L)).to(pae.device)
+ mask_2d = mask_2d * mask_1d[:, :, None] * mask_1b[:, None, :]
+ return mask_loss(pae, mask_2d)
+
+
+def _get_helix_loss(dgram, dgram_bins, offset=None, mask_2d=None, binary=False, **kwargs):
+   '''helix bias loss'''
+   x = _get_con_loss(dgram, dgram_bins, cutoff=6.0, binary=binary)
+   if offset is None:
+       if mask_2d is None:
+           return x.diagonal(offset=3).mean()
+       else:
+           mask_2d = mask_2d.float()
+           return (x * mask_2d).diagonal(offset=3, dim1=-2, dim2=-1).sum() / (torch.diagonal(mask_2d, offset=3, dim1=-2, dim2=-1).sum() + 1e-8)
+
+   else:
+       mask = (offset == 3).float()
+       if mask_2d is not None:
+           mask = mask * mask_2d.float()
+       return (x * mask).sum() / (mask.sum() + 1e-8)
+
+
+def get_ca_coords(sample_atom_coords, batch, binder_chain='A'):
+   atom_to_token = batch['atom_to_token'] * (batch['entity_id']==chain_to_number[binder_chain])
+   atom_order = torch.cumsum(atom_to_token, dim=1)
+   ca_mask = torch.sum((atom_order == 2).to(atom_to_token.dtype), dim=-1)[0]
+   ca_coords = sample_atom_coords[:,ca_mask==1,:]
+   return ca_coords
+
+
+def add_rg_loss(sample_atom_coords, batch, length, binder_chain='A'):
+   ca_coords = get_ca_coords(sample_atom_coords, batch, binder_chain)
+   center_of_mass = ca_coords.mean(1, keepdim=True)  # keepdim for proper broadcasting
+   squared_distances = torch.sum(torch.square(ca_coords - center_of_mass), dim=-1)
+   rg = torch.sqrt(squared_distances.mean() + 1e-8)
+   rg_th = 2.38 * ca_coords.shape[1] ** 0.365
+   loss = torch.nn.functional.elu(rg - rg_th)
+   return loss, rg
+
+
+def get_boltz_model(checkpoint: Optional[str] = None, predict_args=None, device: Optional[str] = None) -> Boltz1:
+   torch.set_grad_enabled(True)
+   torch.set_float32_matmul_precision("highest")
+   diffusion_params = BoltzDiffusionParams()
+   diffusion_params.step_scale = 1.638  # Default value
+   model_module: Boltz1 = Boltz1.load_from_checkpoint(
+       checkpoint,
+       strict=False,
+       predict_args=predict_args,
+       map_location=device,
+       diffusion_process_args=asdict(diffusion_params),
+       ema=False,
+       structure_prediction_training=True,
+       no_msa=False,
+       no_atom_encoder=False,
+   )
+   return model_module
+    
 def boltz_hallucination(
     # Required arguments
     boltz_model,
