@@ -75,9 +75,9 @@ Examples:
     parser.add_argument('--input_type', type=str, choices=['pdb', 'custom'], default='pdb',
                         help='Input type: pdb code or custom input')
     
-    ####### NEED EDIT HERE ####### (EDIT TO ADD): Modify to accept a list of paths or a directory (e.g. nargs='+' or type=list)
+    ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic allows for colon-separated paths in parsing
     parser.add_argument('--pdb_path', type=str, default='',
-                        help='Path to a local PDB file (if specify use custom pdb, else fetch from RCSB)')
+                        help='Path to local PDB file(s). For multiple inputs, separate with colon (e.g. path1.pdb:path2.pdb)')
                         
     parser.add_argument('--pdb_target_ids', type=str, default='',
                         help='Target PDB IDs (comma-separated, e.g., "C,D")')
@@ -653,49 +653,80 @@ def generate_yaml_config(args, config_obj):
         constraints, modifications = process_design_constraints(target_id_map, args.modifications, args.modifications_positions, args.modification_target, args.contact_residues, args.constraint_target, args.binder_id)
     else:
         constraints, modifications = None, None
-    target = []
+    
+    # Initialize list to hold target data for all inputs
+    # If single PDB, this will be a list of length 1 containing the sequence data
+    # If multiple PDBs (separated by colon), it contains data for each state
+    all_targets_data = []
+
     if args.input_type == "pdb":
         pdb_target_ids = [str(x.strip()) for x in args.pdb_target_ids.split(",")] if args.pdb_target_ids else None
         target_mols = [str(x.strip()) for x in args.target_mols.split(",")] if args.target_mols else None
         
-        ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic below handles a single file path. Needs loop for multiple PDBs.
+        ####### NEED EDIT HERE ####### (EDIT TO ADD): Logic handles list splitting by colon
+        pdb_paths = []
         if args.pdb_path:
-            pdb_path = Path(args.pdb_path) 
-            print("load local pdb from", pdb_path)
-            if not pdb_path.is_file():
-                raise FileNotFoundError(f"Could not find local PDB: {args.pdb_path}")
+            # Check for colon delimiter for multiple PDBs
+            if ':' in args.pdb_path:
+                pdb_paths = [Path(p.strip()) for p in args.pdb_path.split(':')]
+                print(f"Detected multiple input PDBs: {pdb_paths}")
+            else:
+                pdb_paths = [Path(args.pdb_path)]
+            
+            for p_path in pdb_paths:
+                print("load local pdb from", p_path)
+                if not p_path.is_file():
+                    raise FileNotFoundError(f"Could not find local PDB: {p_path}")
         else:
             print("fetch pdb from RCSB")
             download_pdb(args.target_name, config_obj.PDB_DIR)
-            pdb_path = config_obj.PDB_DIR / f"{args.target_name}.pdb"
+            # Default to single path if fetching
+            pdb_paths = [config_obj.PDB_DIR / f"{args.target_name}.pdb"]
 
-        if args.target_type in ['rna', 'dna']:
-            ####### NEED EDIT HERE ####### (EDIT TO ADD): If loop added above, call this for each PDB and aggregate sequences
-            nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
-            for target_id in pdb_target_ids:
-                target.append(nucleotide_dict[target_id]['seq'])
-        elif args.target_type == 'small_molecule':
-            ####### NEED EDIT HERE ####### (EDIT TO ADD): Ensure this handles multiple structures if needed
-            ligand_dict = get_ligand_from_pdb(args.target_name)
-            for target_mol in target_mols:
-                print(target_mol, ligand_dict.keys())
-                target.append(ligand_dict[target_mol])
-        elif args.target_type == 'protein':
-            ####### NEED EDIT HERE ####### (EDIT TO ADD): If loop added above, call this for each PDB and aggregate sequences
-            chain_sequences = get_chains_sequence(pdb_path)
-            for target_id in pdb_target_ids:
-                target.append(chain_sequences[target_id])
-        else:
-            raise ValueError(f"Unsupported target type: {args.target_type}")
+        # Loop through each PDB path to extract sequences/structures
+        for pdb_path in pdb_paths:
+            current_target_seqs = []
+            
+            if args.target_type in ['rna', 'dna']:
+                ####### NEED EDIT HERE ####### (EDIT TO ADD): Sequence extraction inside loop
+                nucleotide_dict = get_nucleotide_from_pdb(pdb_path)
+                for target_id in pdb_target_ids:
+                    current_target_seqs.append(nucleotide_dict[target_id]['seq'])
+            
+            elif args.target_type == 'small_molecule':
+                ####### NEED EDIT HERE ####### (EDIT TO ADD): Small molecule extraction
+                ligand_dict = get_ligand_from_pdb(args.target_name) # Uses name, might need adjustment if relying on PDB file content
+                for target_mol in target_mols:
+                    print(target_mol, ligand_dict.keys())
+                    current_target_seqs.append(ligand_dict[target_mol])
+            
+            elif args.target_type == 'protein':
+                ####### NEED EDIT HERE ####### (EDIT TO ADD): Protein chain extraction inside loop
+                chain_sequences = get_chains_sequence(pdb_path)
+                for target_id in pdb_target_ids:
+                    current_target_seqs.append(chain_sequences[target_id])
+            else:
+                raise ValueError(f"Unsupported target type: {args.target_type}")
+            
+            # Add the extracted sequences for this PDB to the master list
+            all_targets_data.append(current_target_seqs)
+            
     else:
+        # Custom input usually means direct sequence strings, treating as single state
         target_inputs = [str(x.strip()) for x in args.custom_target_input.split(",")] if args.custom_target_input else []
-        target = target_inputs or [args.target_name]
+        # Wrap in a list to maintain consistency with multi-state structure above
+        all_targets_data.append(target_inputs or [args.target_name])
 
-    ####### NEED EDIT HERE ####### (EDIT TO ADD): The 'target' variable passed here needs to contain data for all input structures
+    ####### NEED EDIT HERE ####### (EDIT TO ADD): Passing the aggregated list to generator
+    # If all_targets_data has length 1 (single PDB), it behaves as before (list of sequences).
+    # If length > 1, generate_yaml_for_target_binder must handle list of lists.
+    # Note: We flatten if it's a single PDB to maintain backward compatibility if the utils expect a simple list
+    final_target_payload = all_targets_data if len(all_targets_data) > 1 else all_targets_data[0]
+
     return generate_yaml_for_target_binder(
         args.target_name, 
         args.target_type,
-        target,
+        final_target_payload,
         config=config_obj,
         binder_id=args.binder_id,
         constraints=constraints,
