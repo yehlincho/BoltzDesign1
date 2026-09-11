@@ -113,7 +113,10 @@ def get_boltz_model(
     no_potentials = True
 ) -> Boltz2:
     torch.set_grad_enabled(grad_enabled)
-    torch.set_float32_matmul_precision("highest")
+    # TF32 matmul is env-controlled (default "highest"=full FP32, unchanged behavior).
+    # Set BOLTZDESIGN_MATMUL_PREC=high to enable TF32 tensor cores (~1.47x/step, no quality
+    # loss per BoltzHunter). Only affects processes started after the env var is set.
+    torch.set_float32_matmul_precision(os.environ.get("BOLTZDESIGN_MATMUL_PREC", "highest"))
     diffusion_params = Boltz2DiffusionParams()
     diffusion_params.step_scale = 1.638  # Default value
     steering_args = BoltzSteeringParams()
@@ -130,6 +133,15 @@ def get_boltz_model(
     )
     pairformer_args.v2 = True if model_version == "boltz2" else False
     pairformer_args.activation_checkpointing = True
+    # MC-dropout: the design loop already runs the model in train() mode, but the
+    # checkpoint sets dropout=0.0, so train mode adds no stochasticity -> every seed
+    # funnels to the same fold. BOLTZDESIGN_MC_DROPOUT>0 injects dropout into the
+    # Pairformer so each design step sees a slightly different network -> diverse
+    # gradients -> escape the shared basin. Default 0.0 = unchanged behavior.
+    _mcd = float(os.environ.get("BOLTZDESIGN_MC_DROPOUT", "0.0"))
+    if _mcd > 0:
+        pairformer_args.dropout = _mcd
+        print(f"[MC-dropout] pairformer dropout set to {_mcd}")
 
     msa_args = MSAModuleArgs(
         subsample_msa=True, num_subsampled_msa=1024, use_paired_feature=True
@@ -171,6 +183,27 @@ def get_boltz_model(
     return model_module
 
 
+def _bd_make_optimizer(params, lr, default_factory):
+    """env-gated optimizer override for the optimizer-comparison experiment.
+
+    BOLTZDESIGN_OPT in {sgd, sgd_mom, adamw}; unset -> default_factory() (current
+    behavior, unchanged). BOLTZDESIGN_MOMENTUM sets SGD momentum (default 0.9 for
+    sgd_mom); BOLTZDESIGN_NESTEROV=1 enables Nesterov. Applied at ALL three design
+    stages so the whole schedule uses one optimizer (stages 2/3 otherwise hardcode SGD).
+    """
+    opt = os.environ.get("BOLTZDESIGN_OPT")
+    if not opt:
+        return default_factory()
+    opt = opt.lower()
+    if opt == "adamw":
+        return torch.optim.AdamW(params, lr=lr)
+    if opt in ("sgd", "sgd_mom"):
+        mom = float(os.environ.get("BOLTZDESIGN_MOMENTUM", "0.9" if opt == "sgd_mom" else "0.0"))
+        nesterov = os.environ.get("BOLTZDESIGN_NESTEROV", "0") == "1" and mom > 0
+        return torch.optim.SGD(params, lr=lr, momentum=mom, nesterov=nesterov)
+    raise ValueError(f"unknown BOLTZDESIGN_OPT={opt!r} (use sgd|sgd_mom|adamw)")
+
+
 def boltz_hallucination(
     boltz_model,
     boltz_model_version,
@@ -190,6 +223,8 @@ def boltz_hallucination(
     semi_greedy_steps=0,
     learning_rate=0.1,
     learning_rate_pre=0.1,
+    learning_rate_end=None,   # if set, anneal base lr learning_rate -> this over the run
+                              # (on top of the built-in temp lr_scale). None = fixed lr.
     inter_chain_cutoff=21.0,
     intra_chain_cutoff=14.0,
     num_inter_contacts=2,
@@ -221,6 +256,7 @@ def boltz_hallucination(
     shifted_fix_motif_pos=None,
     omit_aa_types="C",
     gpu_id=0,
+    grad_noise=0.0,
 ):
 
 
@@ -280,6 +316,31 @@ def boltz_hallucination(
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     boltz_model.train() if set_train else boltz_model.eval()
     print(f"set in {'train' if set_train else 'eval'} mode")
+    # Optimization: we only optimize res_type_logits, never the model weights, so
+    # computing/accumulating weight gradients in backward() is pure waste. Freezing
+    # the model params (requires_grad=False) skips the weight-grad matmuls and drops
+    # activations only needed for them. The logit-gradient is numerically identical.
+    # env-gated so the default path is unchanged.
+    if os.environ.get("BOLTZDESIGN_FREEZE_WEIGHTS", "1") == "1":
+        _nfrozen = 0
+        for _p in boltz_model.parameters():
+            if _p.requires_grad:
+                _p.requires_grad_(False)
+                _nfrozen += 1
+        print(f"[freeze-weights] froze {_nfrozen} boltz param tensors (weight grads off)")
+    # env-gated reproducibility: lets us verify freeze vs no-freeze from an identical
+    # init (same Gumbel logit init + same forward RNG stream). Off by default.
+    _seed = os.environ.get("BOLTZDESIGN_SEED")
+    if _seed is not None:
+        _s = int(_seed)
+        random.seed(_s); np.random.seed(_s)
+        torch.manual_seed(_s); torch.cuda.manual_seed_all(_s)
+        print(f"[seed] global seed set to {_s}")
+    # "keep soft" lever (over-optimization study): floor the softmax temperature endpoint
+    # so confident positions don't freeze into a sharp/adversarial minimum. 0.01 = default.
+    _min_temp = float(os.environ.get("BOLTZDESIGN_MIN_TEMP", "0.01"))
+    if _min_temp != 0.01:
+        print(f"[min-temp] temperature endpoint floored at {_min_temp}")
 
     def get_batch(
         target,
@@ -518,17 +579,14 @@ def boltz_hallucination(
         batch["res_type_logits"] = batch["res_type_logits"].float()
 
     batch["res_type_logits"].requires_grad = True
-    optimizer = (
-        torch.optim.AdamW(
-            [batch["res_type_logits"]],
-            lr=learning_rate_pre if pre_run else learning_rate,
+    _lr0 = learning_rate_pre if pre_run else learning_rate
+    def _default_opt():
+        return (
+            torch.optim.AdamW([batch["res_type_logits"]], lr=_lr0)
+            if optimizer_type == "AdamW"
+            else torch.optim.SGD([batch["res_type_logits"]], lr=_lr0)
         )
-        if optimizer_type == "AdamW"
-        else torch.optim.SGD(
-            [batch["res_type_logits"]],
-            lr=learning_rate_pre if pre_run else learning_rate,
-        )
-    )
+    optimizer = _bd_make_optimizer([batch["res_type_logits"]], _lr0, _default_opt)
 
     def norm_seq_grad(grad, chain_mask):
         chain_mask = chain_mask.bool()
@@ -828,6 +886,9 @@ def boltz_hallucination(
             batch["logits"] = alpha * batch["res_type_logits"]
             X = batch["logits"] - omit_mask
             batch["soft"] = torch.softmax(X / opt["temp"], dim=-1)
+            # item 3: keep dL/d(prob) available for the direct-probability update.
+            if os.environ.get("BOLTZDESIGN_PROB_OPT") == "1":
+                batch["soft"].retain_grad()
             batch["hard"] = torch.zeros_like(batch["soft"]).scatter_(
                 -1, batch["soft"].max(dim=-1, keepdim=True)[1], 1.0
             )
@@ -875,10 +936,18 @@ def boltz_hallucination(
             lr_scale = step * ((1 - opt["soft"]) + (opt["soft"] * opt["temp"]))
             num_optimizing_binder_pos = int(opt["num_optimizing_binder_pos"])
 
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = learning_rate * lr_scale
+            # Optional annealed BASE lr (high early -> low late), on top of the built-in
+            # temp lr_scale. Decouples the exploration phase (high lr -> compact folds)
+            # from the refinement phase (low lr -> higher confidence). None = fixed lr.
+            if learning_rate_end is not None:
+                base_lr = learning_rate + (learning_rate_end - learning_rate) * ((i) / iters)
+            else:
+                base_lr = learning_rate
 
-            opt["lr_rate"] = learning_rate * lr_scale
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = base_lr * lr_scale
+
+            opt["lr_rate"] = base_lr * lr_scale
 
             batch = update_sequence(
                 opt,
@@ -928,6 +997,18 @@ def boltz_hallucination(
             print("total_loss: ", total_loss.item())
             total_loss.backward()
 
+            # item 3: direct-probability (mirror-descent / exponentiated-gradient) update.
+            # The default update uses dL/d(logits) = J_softmax . dL/d(prob), whose softmax
+            # Jacobian attenuates confident positions (vanishing grad once a residue is
+            # ~decided). Overriding the logit grad with dL/d(prob) itself lets confident
+            # positions keep moving. The subsequent masking/normalization still applies.
+            # env-gated; unset -> unchanged.
+            if os.environ.get("BOLTZDESIGN_PROB_OPT") == "1":
+                _soft = batch.get("soft", None)
+                if (_soft is not None and getattr(_soft, "grad", None) is not None
+                        and batch["res_type_logits"].grad is not None):
+                    batch["res_type_logits"].grad = _soft.grad.clone()
+
             if batch["res_type_logits"].grad is not None:
                 if motif_scaffolding and shifted_motifs:
                     chain_indices = torch.where(chain_mask)[1]
@@ -954,6 +1035,25 @@ def boltz_hallucination(
                 batch["res_type_logits"].grad = norm_seq_grad(
                     batch["res_type_logits"].grad, chain_mask
                 )
+
+                # SGLD-style gradient noise: inject annealed Gaussian noise into the
+                # binder-position gradients to escape sharp local minima (e.g. the
+                # helix basin the ligand-masked warm-up locks boltz2 into). Noise is
+                # scaled to the gradient's own magnitude (dimensionless grad_noise)
+                # and annealed linearly to 0 over the stage. Restricted to the binder
+                # chain + allowed AA columns, mirroring the gradient masks above.
+                if grad_noise and grad_noise > 0:
+                    noise_scale = grad_noise * max(0.0, 1.0 - i / max(iters, 1))
+                    if noise_scale > 0:
+                        g = batch["res_type_logits"].grad
+                        binder_rows = (
+                            batch["entity_id"] == CHAIN_TO_NUMBER[binder_chain]
+                        )
+                        gstd = g[binder_rows].std() + 1e-8
+                        noise = torch.randn_like(g) * (noise_scale * gstd)
+                        noise[~binder_rows, :] = 0
+                        noise[..., omit_indices + non_protein_indices] = 0
+                        batch["res_type_logits"].grad = g + noise
 
                 optimizer.step()
                 optimizer.zero_grad()
@@ -1084,12 +1184,14 @@ def boltz_hallucination(
             print("set res_type_logits to logits")
             new_logits = (alpha * batch["res_type_logits"]).clone().detach().requires_grad_(True)
             batch["res_type_logits"] = new_logits
-            optimizer = torch.optim.SGD([batch["res_type_logits"]], lr=learning_rate)
+            optimizer = _bd_make_optimizer(
+                [batch["res_type_logits"]], learning_rate,
+                lambda: torch.optim.SGD([batch["res_type_logits"]], lr=learning_rate))
             
             stage2_params = {
                 "soft": 1.0,
                 "temp": 1.0,
-                "e_temp": 0.01,
+                "e_temp": _min_temp,
                 "num_optimizing_binder_pos": 8,
                 "e_num_optimizing_binder_pos": 12,
             }
@@ -1108,7 +1210,7 @@ def boltz_hallucination(
             stage3_params = {
                 "soft": 1.0,
                 "hard": 1.0,
-                "temp": 0.01,
+                "temp": _min_temp,
                 "num_optimizing_binder_pos": 12,
                 "e_num_optimizing_binder_pos": 16,
             }
@@ -1171,12 +1273,14 @@ def boltz_hallucination(
             print("set res_type_logits to logits")
             new_logits = (alpha * batch["res_type_logits"]).clone().detach().requires_grad_(True)
             batch["res_type_logits"] = new_logits
-            optimizer = torch.optim.SGD([batch["res_type_logits"]], lr=learning_rate)
+            optimizer = _bd_make_optimizer(
+                [batch["res_type_logits"]], learning_rate,
+                lambda: torch.optim.SGD([batch["res_type_logits"]], lr=learning_rate))
             
             stage2_params = {
                 "soft": 1.0,
                 "temp": 1.0,
-                "e_temp": 0.01,
+                "e_temp": _min_temp,
                 "num_optimizing_binder_pos": 8,
                 "e_num_optimizing_binder_pos": 12,
             }
@@ -1195,7 +1299,7 @@ def boltz_hallucination(
             stage3_params = {
                 "soft": 1.0,
                 "hard": 1.0,
-                "temp": 0.01,
+                "temp": _min_temp,
                 "num_optimizing_binder_pos": 12,
                 "e_num_optimizing_binder_pos": 16,
             }

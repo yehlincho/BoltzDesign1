@@ -15,6 +15,19 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 warnings.simplefilter(action="ignore", category=DeprecationWarning)
 sys.path.append(f"{os.getcwd()}/boltzdesign")
 
+# --- Select the GPU BEFORE any torch/CUDA import so CUDA_VISIBLE_DEVICES takes effect. ---
+# The rest of the code (and boltzdesign_utils) address the chosen GPU as cuda:0, which only
+# works if visibility is restricted here, before torch initializes CUDA. This is what makes
+# --gpu_id actually pick the physical GPU (previously it always ran on GPU 0).
+def _early_gpu_select():
+    import argparse as _ap
+    _p = _ap.ArgumentParser(add_help=False)
+    _p.add_argument("--gpu_id", type=int, default=0)
+    _gid = _p.parse_known_args()[0].gpu_id
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(_gid)
+_early_gpu_select()
+
 from boltzdesign_utils import *
 from ligandmpnn_utils import *
 from alphafold_utils import *
@@ -45,9 +58,16 @@ def str2bool(v):
 
 
 def setup_gpu_environment(gpu_id):
-    """Setup GPU environment variables"""
+    """Setup GPU environment variables.
+
+    NOTE: we intentionally do NOT set CUDA_VISIBLE_DEVICES here. It used to be set at
+    runtime (after torch/CUDA had already initialized via the top-level imports), so it
+    had no effect and the process defaulted to physical GPU 0 (cuda:0) regardless of
+    --gpu_id. We now select the device explicitly everywhere via f"cuda:{gpu_id}" (see
+    below and boltzdesign_utils.py), which is consistent with the AF3 docker subprocess
+    that receives the raw physical GPU id.
+    """
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
 
 def parse_arguments():
@@ -226,7 +246,7 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
 
     # Iteration parameters
     parser.add_argument(
-        "--pre_iteration", type=int, default=30, help="Pre-iteration steps"
+        "--pre_iteration", type=int, default=0, help="Pre-iteration steps"
     )
     parser.add_argument(
         "--soft_iteration", type=int, default=75, help="Soft iteration steps"
@@ -299,6 +319,15 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
         help="Learning rate for pre iterations (warm-up stage)",
     )
     parser.add_argument(
+        "--lr_end",
+        type=float,
+        default=None,
+        help="If set, anneal the base learning rate from --learning_rate (start) to this "
+        "value (end) over the design, ON TOP of the built-in temp lr decay. High-early / "
+        "low-late decouples the exploration phase (high lr -> compact folds) from the "
+        "refinement phase (low lr -> higher confidence). None = fixed lr (default).",
+    )
+    parser.add_argument(
         "--e_soft", type=float, default=0.8, help="Softmax temperature for 3stages"
     )
     parser.add_argument(
@@ -330,7 +359,7 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
     parser.add_argument(
         "--num_intra_contacts",
         type=int,
-        default=2,
+        default=4,
         help="Number of intra-chain contacts",
     )
 
@@ -352,10 +381,30 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
         "--rg_loss", type=float, default=0.0, help="Radius of gyration loss weight"
     )
     parser.add_argument(
-        "--helix_loss_max", type=float, default=0.0, help="Maximum helix loss weights"
+        "--grad_noise",
+        type=float,
+        default=0.0,
+        help="SGLD-style gradient-noise scale (dimensionless, relative to gradient "
+        "magnitude), annealed to 0 over each stage. Injects noise into binder-position "
+        "gradients to escape sharp local minima (e.g. boltz2's warm-up helix basin). "
+        "0 = off (standard gradient descent). Try 0.3-1.0 for boltz2.",
     )
     parser.add_argument(
-        "--helix_loss_min", type=float, default=-0.3, help="Minimum helix loss weights"
+        "--omit_aa_types",
+        type=str,
+        default="C",
+        help="Amino acids (one-letter, concatenated) forbidden during design; masked "
+        "from the logits with their gradients zeroed. Default 'C' (cysteine). Use e.g. "
+        "'CN' to also forbid asparagine, which boltz2 over-uses as a compositional "
+        "attractor that drives mode collapse.",
+    )
+    parser.add_argument(
+        "--helix_loss_max", type=float, default=None,
+        help="Max helix loss weight. Default is model-specific (boltz1 0.0, boltz2 -0.3); an explicit value overrides."
+    )
+    parser.add_argument(
+        "--helix_loss_min", type=float, default=None,
+        help="Min helix loss weight. Default is model-specific (boltz1 -0.3, boltz2 -0.6); an explicit value overrides."
     )
 
     # LigandMPNN parameters
@@ -481,7 +530,16 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
             args.boltz_checkpoint = "~/.boltz/boltz1_conf.ckpt"
         else:  # boltz2
             args.boltz_checkpoint = "~/.boltz/boltz2_conf.ckpt"
-    
+
+    # Model-conditional helix_loss defaults (an explicit --helix_loss_* value overrides).
+    # boltz1 tips to beta at ~-0.2, so [-0.3, 0] spans helix<->beta (diversity); boltz2 is
+    # ~10x less sensitive and stays confident-helical in [-0.6, -0.3]. Rationale + data:
+    # docs/helix_loss_model_specific.md
+    if args.helix_loss_min is None:
+        args.helix_loss_min = -0.3 if args.boltz_model_version == "boltz1" else -0.6
+    if args.helix_loss_max is None:
+        args.helix_loss_max = 0.0 if args.boltz_model_version == "boltz1" else -0.3
+
     return args
 
 
@@ -590,6 +648,7 @@ def update_config_with_args(config, args):
         "design_algorithm": args.design_algorithm,
         "learning_rate": args.learning_rate,
         "learning_rate_pre": args.learning_rate_pre,
+        "learning_rate_end": args.lr_end,
         "e_soft": args.e_soft,
         "e_soft_1": args.e_soft_1,
         "e_soft_2": args.e_soft_2,
@@ -614,6 +673,8 @@ def update_config_with_args(config, args):
         "fix_motif_pos": args.fix_motif_pos,
         "min_motif_gap": args.min_motif_gap,
         "fix_motif_gap_to_min": args.fix_motif_gap_to_min,
+        "grad_noise": args.grad_noise,
+        "omit_aa_types": args.omit_aa_types,
     }
 
     for param_name, param_value in advanced_params.items():
