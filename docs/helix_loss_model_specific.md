@@ -7,11 +7,11 @@ differently.** An explicit `--helix_loss_*` value overrides the default.
 | model | default `(min, max)` | why |
 |---|---|---|
 | **boltz1** | `(-0.3, 0.0)` | tips to β at ~−0.2, so this spans helix↔β (diverse, confident) |
-| **boltz2** | `(-0.6, -0.3)` | ~10× less sensitive; stays confident-helical (needs ~−3 for β) |
+| **boltz2** | `(-0.3, -0.05)` | ~10× less sensitive; light suppression keeps it confident-helical (needs ~−3 for β) |
 
-**Why not one shared default:** `(-0.6,-0.3)` on boltz1 → 100% β / no helix (both past its
-−0.2 tipping point); `(-0.3,0)` on boltz2 → all helix. The same number means opposite
-things, so one global default is wrong for one model.
+**Why not one shared default:** `(-0.3,0)` spans helix↔β on boltz1 (past its −0.2 tipping
+point) but is all-helix on boltz2 (~10× less sensitive), so the same number means different
+things per model.
 
 **Override examples (boltz2):** β-sheet binder `--helix_loss_min -3 --helix_loss_max -3`;
 max-confidence `--helix_loss_min -0.3 --helix_loss_max -0.3`.

@@ -400,11 +400,11 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
     )
     parser.add_argument(
         "--helix_loss_max", type=float, default=None,
-        help="Max helix loss weight. Default is model-specific (boltz1 0.0, boltz2 -0.3); an explicit value overrides."
+        help="Max helix loss weight. Default is model-specific (boltz1 0.0, boltz2 -0.05); an explicit value overrides."
     )
     parser.add_argument(
         "--helix_loss_min", type=float, default=None,
-        help="Min helix loss weight. Default is model-specific (boltz1 -0.3, boltz2 -0.6); an explicit value overrides."
+        help="Min helix loss weight. Default is model-specific (boltz1 -0.3, boltz2 -0.3); an explicit value overrides."
     )
 
     # LigandMPNN parameters
@@ -559,12 +559,12 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
 
     # Model-conditional helix_loss defaults (an explicit --helix_loss_* value overrides).
     # boltz1 tips to beta at ~-0.2, so [-0.3, 0] spans helix<->beta (diversity); boltz2 is
-    # ~10x less sensitive and stays confident-helical in [-0.6, -0.3]. Rationale + data:
+    # ~10x less sensitive and stays confident-helical in [-0.3, -0.05]. Rationale + data:
     # docs/helix_loss_model_specific.md
     if args.helix_loss_min is None:
-        args.helix_loss_min = -0.3 if args.boltz_model_version == "boltz1" else -0.6
+        args.helix_loss_min = -0.3
     if args.helix_loss_max is None:
-        args.helix_loss_max = 0.0 if args.boltz_model_version == "boltz1" else -0.3
+        args.helix_loss_max = 0.0 if args.boltz_model_version == "boltz1" else -0.05
 
     return args
 
@@ -711,9 +711,9 @@ def update_config_with_args(config, args):
     # Model-conditional helix_loss default (unless user set --helix_loss_*)
     _is_b1 = args.boltz_model_version == "boltz1"
     if "helix_loss_min" not in explicit_args:
-        config["helix_loss_min"] = -0.3 if _is_b1 else -0.6
+        config["helix_loss_min"] = -0.3
     if "helix_loss_max" not in explicit_args:
-        config["helix_loss_max"] = 0.0 if _is_b1 else -0.3
+        config["helix_loss_max"] = 0.0 if _is_b1 else -0.05
     return config
 
 
