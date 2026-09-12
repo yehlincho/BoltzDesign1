@@ -502,6 +502,32 @@ Use this OR pdb_path/pdb_target_ids, not both.''',
         help="Run AlphaFold validation step",
     )
     parser.add_argument(
+        "--fast_validation",
+        type=str2bool,
+        default=True,
+        help="Use ProteinHunter's warm/batched AF3 validator instead of the per-design "
+        "Docker AF3 (same AF3 model, ~4-5x faster end-to-end). Auto-falls back to Docker "
+        "if the af3 env / ProteinHunter is not found. Set False to force Docker.",
+    )
+    parser.add_argument(
+        "--af3_ph_env_python",
+        type=str,
+        default="~/ProteinHunter/.conda/envs/af3/bin/python",
+        help="Python interpreter of the af3 env (used only with --fast_validation)",
+    )
+    parser.add_argument(
+        "--proteinhunter_root",
+        type=str,
+        default="~/ProteinHunter",
+        help="ProteinHunter repo root (used only with --fast_validation)",
+    )
+    parser.add_argument(
+        "--af3_num_diffusion_samples",
+        type=int,
+        default=1,
+        help="AF3 diffusion samples for --fast_validation (Docker path uses its own setting)",
+    )
+    parser.add_argument(
         "--run_rosetta",
         type=str2bool,
         default=True,
@@ -976,6 +1002,87 @@ def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
     return af_output_dir, af_output_apo_dir, af_pdb_dir, af_pdb_dir_apo
 
 
+def _ph_af3_available(args):
+    """True if the af3 env python, ProteinHunter root, and the driver all exist,
+    so --fast_validation can run; otherwise the caller falls back to Docker AF3."""
+    py = os.path.expanduser(args.af3_ph_env_python)
+    ph_root = os.path.expanduser(args.proteinhunter_root)
+    driver = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "boltzdesign", "ph_af3_driver.py")
+    return (os.path.exists(py)
+            and os.path.isdir(os.path.join(ph_root, "validation"))
+            and os.path.exists(driver))
+
+
+def run_alphafold_step_ph(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
+    """AF3 validation via ProteinHunter's warm/batched validator (--fast_validation).
+
+    Same AF3 model as the Docker path; the speedup is engineering (model stays warm,
+    MSA cached, no per-design container). PH predicts holo AND apo internally and emits
+    PDBs + af3_validation_results.csv. We reshape those into the exact dir/file contract
+    the shipped path returns, then reuse `calculate_holo_apo_rmsd` for identical RMSD.
+    """
+    print("Starting AlphaFold validation step (ProteinHunter warm AF3)...")
+
+    yaml_dir_success = os.path.join(
+        ligandmpnn_dir, "01_lmpnn_redesigned_high_iptm", "yaml"
+    )
+    ph_out_dir = os.path.join(ligandmpnn_dir, "02_ph_af3")
+    af_output_dir = os.path.join(ph_out_dir, "af3_structures")
+    af_output_apo_dir = os.path.join(ph_out_dir, "af3_structures_apo")
+    af_pdb_dir = f"{ligandmpnn_dir}/03_af_pdb_success"
+    af_pdb_dir_apo = f"{ligandmpnn_dir}/03_af_pdb_apo"
+    for d in (ph_out_dir, af_pdb_dir, af_pdb_dir_apo):
+        os.makedirs(d, exist_ok=True)
+
+    ph_root = os.path.expanduser(args.proteinhunter_root)
+    driver = os.path.join(work_dir, "boltzdesign", "ph_af3_driver.py")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = ph_root + os.pathsep + env.get("PYTHONPATH", "")
+    subprocess.run(
+        [
+            os.path.expanduser(args.af3_ph_env_python), "-u", driver,
+            "--yaml_dir", yaml_dir_success,
+            "--out_dir", ph_out_dir,
+            "--binder_id", args.binder_id,
+            "--gpu", str(args.gpu_id),
+            "--proteinhunter_root", ph_root,
+            "--num_diffusion_samples", str(args.af3_num_diffusion_samples),
+        ],
+        check=True, env=env,
+    )
+
+    # Reshape PH outputs -> shipped downstream contract. Success gate matches the Docker
+    # path: global iptm > 0.5 AND plddt > 0.7 (PH plddt is 0-1; interface_pae reported).
+    results_csv = os.path.join(ph_out_dir, "af3_validation_results.csv")
+    df = pd.read_csv(results_csv)
+    iptm_col = "iptm_global" if "iptm_global" in df.columns else "iptm"
+    scores = []
+    for _, row in df.iterrows():
+        name, iptm, plddt = row["binder_id"], row[iptm_col], row["plddt"]
+        if not (iptm > 0.5 and plddt > 0.7):
+            continue
+        holo = os.path.join(af_output_dir, f"{name}.pdb")
+        apo = os.path.join(af_output_apo_dir, f"{name}_apo.pdb")
+        if not (os.path.exists(holo) and os.path.exists(apo)):
+            print(f"  skip {name}: missing holo/apo PDB")
+            continue
+        # Match holo/apo by identical filename, as calculate_holo_apo_rmsd expects.
+        shutil.copy(holo, os.path.join(af_pdb_dir, f"{name}.pdb"))
+        shutil.copy(apo, os.path.join(af_pdb_dir_apo, f"{name}.pdb"))
+        scores.append({"file": f"{name}.cif", "iptm": iptm, "plddt": plddt * 100})
+
+    if not scores:
+        print("No successful designs from AlphaFold")
+        sys.exit(1)
+    pd.DataFrame(scores).to_csv(
+        os.path.join(af_pdb_dir, "high_iptm_confidence_scores.csv"), index=False
+    )
+    calculate_holo_apo_rmsd(af_pdb_dir, af_pdb_dir_apo, args.binder_id)
+    print("AlphaFold validation step (ProteinHunter warm AF3) completed!")
+    return af_output_dir, af_output_apo_dir, af_pdb_dir, af_pdb_dir_apo
+
+
 def run_rosetta_step(args, ligandmpnn_dir, af_pdb_dir, af_pdb_dir_apo):
     """Run Rosetta energy calculation (protein targets only)"""
     if args.target_type not in ["protein", "peptide"]:
@@ -1225,12 +1332,16 @@ def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
         )
     if args.run_alphafold:
         mod_to_wt_aa = modification_to_wt_aa(args.modifications, args.modifications_wt)
+        use_ph = args.fast_validation and _ph_af3_available(args)
+        if args.fast_validation and not use_ph:
+            print("fast_validation requested but af3 env / ProteinHunter not found; "
+                  "falling back to Docker AF3.")
         (
             results["af_output_dir"],
             results["af_output_apo_dir"],
             results["af_pdb_dir"],
             results["af_pdb_dir_apo"],
-        ) = run_alphafold_step(
+        ) = (run_alphafold_step_ph if use_ph else run_alphafold_step)(
             args, results["ligandmpnn_dir"], args.work_dir or os.getcwd(), mod_to_wt_aa
         )
 
