@@ -715,9 +715,11 @@ def update_config_with_args(config, args):
     if "helix_loss_max" not in explicit_args:
         config["helix_loss_max"] = 0.0 if _is_b1 else -0.05
     # pre_iteration default 0 must win over the stale (30) config YAMLs; the loop above
-    # only applies it when the user types --pre_iteration.
+    # only applies it when the user types --pre_iteration. Same for num_intra_contacts (4).
     if "pre_iteration" not in explicit_args:
         config["pre_iteration"] = args.pre_iteration
+    if "num_intra_contacts" not in explicit_args:
+        config["num_intra_contacts"] = args.num_intra_contacts
     return config
 
 

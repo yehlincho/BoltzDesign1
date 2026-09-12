@@ -19,7 +19,7 @@ length_min: 100
 mask_ligand: false
 msa_max_seqs: 4096
 num_inter_contacts: 2
-num_intra_contacts: 2
+num_intra_contacts: 4
 optimize_contact_per_binder_pos: true
 optimizer_type: SGD
 pocket_conditioning: true
