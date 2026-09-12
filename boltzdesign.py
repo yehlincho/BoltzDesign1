@@ -714,6 +714,10 @@ def update_config_with_args(config, args):
         config["helix_loss_min"] = -0.3
     if "helix_loss_max" not in explicit_args:
         config["helix_loss_max"] = 0.0 if _is_b1 else -0.05
+    # pre_iteration default 0 must win over the stale (30) config YAMLs; the loop above
+    # only applies it when the user types --pre_iteration.
+    if "pre_iteration" not in explicit_args:
+        config["pre_iteration"] = args.pre_iteration
     return config
 
 
