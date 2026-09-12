@@ -681,6 +681,13 @@ def update_config_with_args(config, args):
         if param_name in explicit_args:
             print(f"Updating {param_name} to {param_value}")
             config[param_name] = param_value
+
+    # Model-conditional helix_loss default (unless user set --helix_loss_*)
+    _is_b1 = args.boltz_model_version == "boltz1"
+    if "helix_loss_min" not in explicit_args:
+        config["helix_loss_min"] = -0.3 if _is_b1 else -0.6
+    if "helix_loss_max" not in explicit_args:
+        config["helix_loss_max"] = 0.0 if _is_b1 else -0.3
     return config
 
 
