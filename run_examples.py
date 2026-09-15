@@ -10,10 +10,6 @@ supported in Boltz 1.0!"), so template examples are boltz2-only.
 
 import subprocess
 
-# AlphaFold3 settings (only needed when run_alphafold is on and fast_validation is off)
-afdb_dir = "~/alphafold3/alphafold3_data_save"
-hmmer_path = "/home/jupyter-yehlin/.conda/envs/alphafold3_venv"
-
 PDL1 = (
     "FTVTVPKDLYVVEYGSNMTIECKFPVEKQLDLAALIVYWEMEDKNIIQFVHGEEDLKVQHSSYRQRARLLKDQ"
     "LSLGNAALQITDVKLQDAGVYRCMISYGGADYKRITVKVNK"
@@ -35,7 +31,7 @@ def run(*args, model="boltz2", suffix=None):
 protein_msa = [
     "--name", "8znl", "--target_type", "protein", "--pdb_target_ids", "A",
     "--target_seq", PDL1, "--use_msa", "True", "--msa_max_seqs", "4096",
-    "--design_samples", "1", "--gpu_id", "0", "--semi_greedy_steps", "1",
+    "--design_samples", "1", "--gpu_id", "0",
 ]
 run(*protein_msa, model="boltz2")
 run(*protein_msa, model="boltz1")
@@ -44,13 +40,18 @@ run(*protein_msa, model="boltz1")
 run(*protein_msa, "--high_iptm", "True", "--i_ptm_cutoff", "0.7",
     model="boltz2", suffix="boltz2_high_iptm")
 
+# 1-2. Optional: semi-greedy MCMC polish after the gradient design (off by default).
+# Each step runs 10 mutation trials scored by Boltz iPTM, so it raises the Boltz
+# confidence it optimizes but costs roughly 2.5 min per design.
+run(*protein_msa, "--semi_greedy_steps", "1", model="boltz2", suffix="boltz2_semigreedy")
+
 # --------------------------------------------------------------------------- #
 # 2. Protein target — template mode (boltz2 only)
 # --------------------------------------------------------------------------- #
 protein_tmpl = [
     "--name", "8znl", "--target_type", "protein", "--pdb_path", "8znl",
     "--pdb_target_ids", "B", "--use_template", "True",
-    "--design_samples", "1", "--gpu_id", "0", "--semi_greedy_steps", "1",
+    "--design_samples", "1", "--gpu_id", "0",
 ]
 run(*protein_tmpl, model="boltz2", suffix="boltz2_template")
 # Boltz-1 does not support templates — use MSA mode (example 1) for boltz1.
@@ -60,7 +61,7 @@ run(*protein_tmpl, model="boltz2", suffix="boltz2_template")
 # --------------------------------------------------------------------------- #
 small_molecule = [
     "--name", "7v11", "--target_type", "small_molecule", "--target_seq", "OQO",
-    "--design_samples", "1", "--gpu_id", "0", "--semi_greedy_steps", "0",
+    "--design_samples", "1", "--gpu_id", "0",
 ]
 run(*small_molecule, model="boltz2")
 run(*small_molecule, model="boltz1")
@@ -77,7 +78,7 @@ run("--name", "7v11", "--target_type", "small_molecule", "--target_seq", "OQO",
 dna = [
     "--name", "5zmc", "--target_type", "dna",
     "--target_seq", "GCCCTTCCGGGTCCCC,CGGGGACCCGGAAGGG",
-    "--design_samples", "1", "--gpu_id", "0", "--semi_greedy_steps", "0",
+    "--design_samples", "1", "--gpu_id", "0",
 ]
 run(*dna, model="boltz2")
 run(*dna, model="boltz1")
@@ -112,6 +113,4 @@ run("--name", "8vc8", "--target_type", "small_molecule", "--target_seq", "HEM",
     "--motif_scaffolding", "True", "--length_min", "140", "--length_max", "150",
     "--motifs", '[{"start_pos": 30, "end_pos": 47}, {"start_pos": 81, "end_pos": 173}]',
     "--min_motif_gap", "15", "--design_samples", "1", "--gpu_id", "0",
-    "--af3_docker_name", "alphafold3_yc",
-    "--af3_database_settings", afdb_dir, "--af3_hmmer_path", hmmer_path,
     model="boltz2", suffix="boltz2_motif_scaffolding")

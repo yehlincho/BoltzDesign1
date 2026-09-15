@@ -130,7 +130,7 @@ config = {
     'soft_iteration': 75,       # Logits to Softmax optimization
     'temp_iteration': 45,       # Softmax temperature annealing
     'hard_iteration': 5,        # Final hard encoding optimization
-    'semi_greedy_steps': 0,     # MCMC based on iPTM score
+    'semi_greedy_steps': 0,     # optional MCMC polish (off by default; see below)
     # Sequence initialization
     'sequence_init': 'gumbel',  # per-position softmax(scale * Gumbel) init
     'init_gumbel_scale': 1.0,   # 1.0 for ligand/metal/NA/peptide; 2.0 for protein targets
@@ -144,6 +144,13 @@ config = {
     'design_algorithm': '3stages',
 }
 ```
+
+> **Note on `semi_greedy_steps`**: optional, **off by default**. Each step runs 10 mutation
+> trials scored by Boltz iPTM and keeps the best, so it reliably raises the Boltz confidence
+> it optimizes (+0.03-0.05 iPTM on ~95% of designs in our runs) but costs roughly 2.5 min per
+> design. Because it selects on the same score it reports, that gain is not independent
+> evidence of a better binder - validate with AlphaFold3 either way. Enable with
+> `--semi_greedy_steps 1`.
 
 > **Note on `pre_iteration`**: the default is now **0**. The ligand-masked warm-up tends to
 > seed elongated helical binders that the model cannot refold, which lowers validated

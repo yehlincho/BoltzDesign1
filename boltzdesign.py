@@ -206,7 +206,7 @@ Use this OR pdb_path/pdb_target_ids, not both.""",
     parser.add_argument("--soft_iteration", type=int, default=75, help="Soft iteration steps")
     parser.add_argument("--temp_iteration", type=int, default=45, help="Temperature iteration steps")
     parser.add_argument("--hard_iteration", type=int, default=5, help="Hard iteration steps")
-    parser.add_argument("--semi_greedy_steps", type=int, default=2, help="Semi-greedy steps")
+    parser.add_argument("--semi_greedy_steps", type=int, default=0, help="Semi-greedy steps")
     parser.add_argument("--recycling_steps", type=int, default=0, help="Recycling steps")
 
     parser.add_argument("--use_potential", type=str2bool, default=False, help="Use potential")
