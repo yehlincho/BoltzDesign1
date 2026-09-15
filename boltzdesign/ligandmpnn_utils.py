@@ -491,32 +491,41 @@ def run_ligandmpnn_redesign(
                     with open(final_yaml_path, "w") as f:
                         yaml.dump(yaml_data, f)
 
-                    import subprocess
+                    print(f"Wrote redesigned YAML for {pdb_name}, sequence {idx + 1}")
 
-                    if boltz_model_version == "boltz1":
-                        subprocess.run(
-                            [
-                                boltz_path,
-                                "predict",
-                                str(final_yaml_path),
-                                "--out_dir",
-                                str(results_final_dir),
-                                "--model",
-                                "boltz1",
-                                "--write_full_pae",
-                            ]
-                        )
-                    elif boltz_model_version == "boltz2":
-                        subprocess.run(
-                            [
-                                boltz_path,
-                                "predict",
-                                str(final_yaml_path),
-                                "--out_dir",
-                                str(results_final_dir),
-                                "--model",
-                                "boltz2",
-                                "--write_full_pae",
-                            ]
-                        )
-                    print(f"Completed processing {pdb_name} for sequence {idx + 1}")
+
+    # Predict every redesigned YAML in a single Boltz call. Boltz accepts a directory and
+    # loads the model once for the whole batch; predicting one YAML per call reloaded the
+    # checkpoint for each design and dominated this stage (~95 s vs ~20 s per design).
+    import shutil
+    import subprocess
+
+    subprocess.run(
+        [
+            boltz_path,
+            "predict",
+            str(lmpnn_yaml_dir),
+            "--out_dir",
+            str(results_final_dir),
+            "--model",
+            boltz_model_version,
+            "--write_full_pae",
+        ]
+    )
+
+    # Boltz names its output folder after the input it was given, so a directory input puts
+    # every design under one boltz_results_<dirname>/predictions/<design>/. Downstream code
+    # reads boltz_results_<design>/predictions/<design>/, so restore that layout.
+    batch_name = os.path.basename(str(lmpnn_yaml_dir).rstrip("/"))
+    batch_predictions = os.path.join(results_final_dir, f"boltz_results_{batch_name}", "predictions")
+    if os.path.isdir(batch_predictions):
+        for design in os.listdir(batch_predictions):
+            src = os.path.join(batch_predictions, design)
+            if not os.path.isdir(src):
+                continue
+            dst = os.path.join(results_final_dir, f"boltz_results_{design}", "predictions", design)
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)
+        shutil.rmtree(os.path.join(results_final_dir, f"boltz_results_{batch_name}"), ignore_errors=True)
