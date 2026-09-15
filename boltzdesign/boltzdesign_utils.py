@@ -62,7 +62,6 @@ from utils import (
     plot_loss_history,
     setup_output_directories,
     save_yaml_configs,
-    plot_loss_history,
     cleanup_iteration,
     CHAIN_TO_NUMBER,
     process_design_results,
@@ -204,6 +203,20 @@ def _bd_make_optimizer(params, lr, default_factory):
     raise ValueError(f"unknown BOLTZDESIGN_OPT={opt!r} (use sgd|sgd_mom|adamw)")
 
 
+def _gumbel_sequence_init(batch, binder_chain, aa_fraction, seed, omit_aa_types, device,
+                          scale=1.0):
+    """Seed the binder's res_type representation with per-position softmax(scale*Gumbel)
+    probabilities (aa_fraction=1.0 = fully Gumbel; scale>1 sharpens). Ligand/target untouched."""
+    sel = batch["entity_id"] == CHAIN_TO_NUMBER[binder_chain]
+    rep = batch["res_type"].clone().detach().to(device).float()
+    sub = rep[sel]
+    omit_mask = get_omit_mask(alphabet, omit_aa_types, device)
+    g = torch.from_numpy(np.random.default_rng(seed).gumbel(size=tuple(sub.shape)))
+    probs = torch.softmax(scale * g.to(device).float() - omit_mask, dim=-1)
+    rep[sel] = (1.0 - aa_fraction) * sub + aa_fraction * probs
+    return rep
+
+
 def boltz_hallucination(
     boltz_model,
     boltz_model_version,
@@ -257,6 +270,10 @@ def boltz_hallucination(
     omit_aa_types="C",
     gpu_id=0,
     grad_noise=0.0,
+    sequence_init="default",
+    init_aa_fraction=1.0,
+    init_seed=None,
+    init_gumbel_scale=1.0,
 ):
 
 
@@ -333,8 +350,10 @@ def boltz_hallucination(
     _seed = os.environ.get("BOLTZDESIGN_SEED")
     if _seed is not None:
         _s = int(_seed)
-        random.seed(_s); np.random.seed(_s)
-        torch.manual_seed(_s); torch.cuda.manual_seed_all(_s)
+        random.seed(_s)
+        np.random.seed(_s)
+        torch.manual_seed(_s)
+        torch.cuda.manual_seed_all(_s)
         print(f"[seed] global seed set to {_s}")
     # "keep soft" lever (over-optimization study): floor the softmax temperature endpoint
     # so confident positions don't freeze into a sharp/adversarial minimum. 0.01 = default.
@@ -350,7 +369,6 @@ def boltz_hallucination(
         keep_record=False,
         boltz_model_version=None,
     ):
-        target_id = target.record.id
         structure = target.structure
 
         coords = np.array([(atom["coords"],) for atom in structure.atoms], dtype=Coords)
@@ -554,7 +572,13 @@ def boltz_hallucination(
                 dim=-1,
             )
     else:
-        batch["res_type_logits"] = torch.from_numpy(input_res_type).to(device)
+        if sequence_init == "gumbel" and pre_iteration == 0:
+            batch["res_type_logits"] = _gumbel_sequence_init(
+                batch, binder_chain, init_aa_fraction, init_seed, omit_aa_types, device,
+                scale=init_gumbel_scale
+            )
+        else:
+            batch["res_type_logits"] = torch.from_numpy(input_res_type).to(device)
 
 
 
@@ -602,7 +626,6 @@ def boltz_hallucination(
     distogram_history = []
     sequence_history = []
     loss_history = []
-    lr_history = []
     con_loss_history = []
     i_con_loss_history = []
     plddt_loss_history = []

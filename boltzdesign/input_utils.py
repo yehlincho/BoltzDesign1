@@ -194,7 +194,6 @@ def get_ligand_smiles(ligand, res_name):
     :param res_name: residue name of ligand to extract
     :return: SMILES string
     """
-    sub_mol = ligand.select(f"resname {res_name}")
     chem_desc = pypdb.describe_chemical(f"{res_name}")
 
     # Extract SMILES from chemical description

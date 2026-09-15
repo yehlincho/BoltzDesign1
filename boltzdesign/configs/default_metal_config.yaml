@@ -3,11 +3,11 @@ design_algorithm: 3stages
 disconnect_feats: true
 disconnect_pairformer: false
 distogram_only: true
-e_soft: 0.8
+e_soft: 1.0
 e_soft_1: 0.8
 e_soft_2: 1.0
 hard_iteration: 5
-helix_loss_max: -0.0
+helix_loss_max: 0.0
 helix_loss_min: -0.3
 increasing_contact_over_itr: false
 inter_chain_cutoff: 20.0
@@ -31,6 +31,8 @@ soft_iteration: 75
 soft_iteration_1: 50
 soft_iteration_2: 50
 temp_iteration: 45
-use_temp: True
 recycling_steps: 0
 noise_scaling: 0.1
+motif_scaffolding: False
+sequence_init: gumbel
+init_gumbel_scale: 1.0

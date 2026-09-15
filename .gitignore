@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Notebook / editor artifacts
+.ipynb_checkpoints/
+.DS_Store
+
+# Run outputs and logs
+outputs/
+inputs/
+*.log
+
+# Model weights / large assets
+LigandMPNN/model_params/
+*.ckpt
+*.pt
+
+# Local scratch
+scratch/
+tmp/

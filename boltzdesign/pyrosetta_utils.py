@@ -62,57 +62,17 @@ def clean_pdb(pdb_file):
     with open(pdb_file, 'w') as f_out:
         f_out.writelines(relevant_lines)
 
-def pr_relax(pdb_file, relaxed_pdb_path):
-    if not os.path.exists(relaxed_pdb_path):
-        relax_start_time = time.time()
-
-        # Generate pose
-        pose = pr.pose_from_pdb(pdb_file)
-        start_pose = pose.clone()
-
-        ### Generate movemaps
-        mmf = MoveMap()
-        mmf.set_chi(True) # enable sidechain movement
-        mmf.set_bb(True) # enable backbone movement, can be disabled to increase speed by 30% but makes metrics look worse on average
-        mmf.set_jump(False) # disable whole chain movement
-
-        # Run FastRelax
-        fastrelax = FastRelax()
-        scorefxn = pr.get_fa_scorefxn()
-        fastrelax.set_scorefxn(scorefxn)
-        fastrelax.set_movemap(mmf) # set MoveMap
-        fastrelax.max_iter(200) # default iterations is 2500
-        fastrelax.min_type("lbfgs_armijo_nonmonotone")
-        fastrelax.constrain_relax_to_start_coords(True)
-        fastrelax.apply(pose)
-
-        # Align relaxed structure to original trajectory
-        align = AlignChainMover()
-        align.source_chain(0)
-        align.target_chain(0)
-        align.pose(start_pose)
-        align.apply(pose)
-
-        # output relaxed and aligned PDB
-        pose.dump_pdb(relaxed_pdb_path)
-        clean_pdb(relaxed_pdb_path)
-
-        relax_time = time.time() - relax_start_time
-        relax_time_text = f"{'%d hours, %d minutes, %d seconds' % (int(relax_time // 3600), int((relax_time % 3600) // 60), int(relax_time % 60))}"
-        #print("Relaxation took: "+relax_time_text)
-        
 def filter_data(main_path):
     filtered_pdb= []
     for pdb in os.listdir(main_path):
         try:
             pdb_path = os.path.join(main_path, pdb)
             data = np.load(f"{pdb_path}/pdb/best.npz")
-            L=len(data['pae'])
             print(pdb, data['metrics'])
             if np.mean(data['plddt']) > 0.85:
                 filtered_pdb.append(pdb_path)
 
-        except:
+        except Exception:
             continue
             
     return filtered_pdb
@@ -155,7 +115,6 @@ def hotspot_residues(trajectory_pdb, binder_chain="B", atom_distance_cutoff=4.0)
         if binder_resname in three_to_one_map:
             aa_single_letter = three_to_one_map[binder_resname]
             for close_idx in close_indices:
-                target_residue = target_atoms[close_idx].get_parent()
                 interacting_residues[binder_residue.id[1]] = aa_single_letter
 
     return interacting_residues
@@ -261,11 +220,11 @@ def score_interface(pdb_file, binder_chain="B"):
     
     # count apolar and aromatic residues at the surface
     for i in range(1, len(surface_res) + 1):
-        if surface_res[i] == True:
+        if surface_res[i]:
             res = binder_pose.residue(i)
 
             # count apolar and aromatic residues as hydrophobic
-            if res.is_apolar() == True or res.name() == 'PHE' or res.name() == 'TRP' or res.name() == 'TYR':
+            if res.is_apolar() or res.name() == 'PHE' or res.name() == 'TRP' or res.name() == 'TYR':
                 exp_apol_count += 1
             total_count += 1
 

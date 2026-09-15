@@ -38,28 +38,70 @@ The setup script will automatically:
 ## Run Code End-to-End
 Run the complete pipeline from BoltzDesign to LigandMPNN/ProteinMPNN redesign and AlphaFold3 cross-validation.
 
+Both **Boltz-2** (default) and **Boltz-1** are supported via `--boltz_model_version {boltz2,boltz1}`.
+See `run_examples.ipynb` / `run_examples.py` for a runnable example of every target type on both models.
 
-Examle for small molecule:
-python boltzdesign.py --target_name 7v11 --target_type small_molecule --target_mols OQO --gpu_id 0 --design_samples 2 --suffix 1
+Small molecule (Boltz-2, the default):
+```bash
+python boltzdesign.py --name 7v11 --target_type small_molecule --target_seq OQO \
+  --gpu_id 0 --design_samples 2 --suffix 1
+```
 
-Example for DNA/RNA PDB design:
-python boltzdesign.py --target_name 5zmc --target_type dna --pdb_target_ids C,D --gpu_id 0 --design_samples 5 --suffix 1
+Same target on Boltz-1:
+```bash
+python boltzdesign.py --name 7v11 --target_type small_molecule --target_seq OQO \
+  --gpu_id 0 --design_samples 2 --suffix 1 --boltz_model_version boltz1
+```
 
-If you want to use your custom PDB file:
-python boltzdesign.py --target_name 7v11 --pdb_path your_pdb_path --target_type small_molecule --target_mols OQO --gpu_id 0 --design_samples 2 --suffix own
+Protein target with MSA:
+```bash
+python boltzdesign.py --name 8znl --target_type protein --pdb_target_ids A \
+  --target_seq FTVTVPKDLYVVEYGSNMTIECKFPVEKQLDLAALIVYWEMEDKNIIQFVHGEEDLKVQHSSYRQRARLLKDQLSLGNAALQITDVKLQDAGVYRCMISYGGADYKRITVKVNK \
+  --use_msa True --gpu_id 0 --design_samples 2 --suffix 1
+```
 
-⚠️ **Warning**: To run the AlphaFold3 cross-validation pipeline, you need to specify your AlphaFold3 directory, Docker name, database settings, and conda environment in the configuration. These can be set using the following arguments:
-- `--alphafold_dir`: Path to your AlphaFold3 installation (default: ~/alphafold3)
-- `--af3_docker_name`: Name of your AlphaFold3 Docker container
-- `--af3_database_settings`: Path to AlphaFold3 database
-- `--af3_hmmer_path`: Path to HMMER
+Protein target with a template (**Boltz-2 only** — Boltz-1 does not support templates):
+```bash
+python boltzdesign.py --name 8znl --target_type protein --pdb_path 8znl --pdb_target_ids B \
+  --use_template True --gpu_id 0 --design_samples 2 --suffix 1
+```
 
-If you want to disable af3 cross validation add flag --run_alphafold False
+DNA/RNA design:
+```bash
+python boltzdesign.py --name 5zmc --target_type dna \
+  --target_seq GCCCTTCCGGGTCCCC,CGGGGACCCGGAAGGG --gpu_id 0 --design_samples 5 --suffix 1
+```
+
+Using your own PDB file:
+```bash
+python boltzdesign.py --name 7v11 --pdb_path your_pdb_path --target_type small_molecule \
+  --target_seq OQO --gpu_id 0 --design_samples 2 --suffix own
+```
+
+### 🧪 AlphaFold3 cross-validation
+
+Designs are validated with AlphaFold3 after LigandMPNN redesign. The validator is warm and
+batched — the model is loaded once and reused across the batch, MSAs are cached — which is
+roughly 4–5× faster end-to-end than launching a container per design, with the same model
+and the same numbers.
+
+AlphaFold3 is **not bundled**: its source is licensed CC BY-NC-SA 4.0 and its parameters
+must be requested from DeepMind ([instructions](https://github.com/google-deepmind/alphafold3)).
+It also needs its own conda environment, since AF3 runs on JAX/Python 3.11 while
+BoltzDesign runs on PyTorch/Python 3.10. `setup.sh` creates it for you if an AlphaFold3
+checkout is present.
+
+- `--alphafold_dir`: your AlphaFold3 installation (default: `~/alphafold3`)
+- `--af3_env_python`: python of the af3 env (default: `~/.conda/envs/af3/bin/python`, or `$AF3_ENV_PYTHON`)
+- `--af3_num_diffusion_samples`: diffusion samples per design (default: 1)
+- `--run_alphafold False`: skip validation entirely
+
+See [docs/af3_validation.md](docs/af3_validation.md) for setup and outputs.
 
 ### 🔧 Additionally, you may need to optimize parameters for your binder/target:
-- If binder does not form a highly compact structure, increase num_intra_contacts e.g. (default) 2 -> 4
+- If binder does not form a highly compact structure, increase num_intra_contacts e.g. (default) 4 -> 8
 - If target does not form interaction with binder, increase num_inter_contacts e.g. (default) 2 -> 4
-- If generated binders have all alpha helices and you want to design beta sheets, change e.g. helix_loss_max 0.0, helix_loss_min = -0.3 to helix_loss_max -0.3, helix_loss_min = -0.6
+- If generated binders have all alpha helices and you want to design beta sheets, lower the helix range, e.g. from the default `helix_loss_min -0.3 / helix_loss_max 0.0` to `-0.6 / -0.3` (more negative = less helix)
 - If interaction features are not obtained through recycling=0, increase recycling_steps to 1 or more
 
 
@@ -73,24 +115,39 @@ If you want to enable visualization of the trajectory, you need to set --save_tr
 
 ## ⚙️ Design Configuration
 
-Configure your molecular design parameters:
+Defaults live in per-target-type YAMLs under `boltzdesign/configs/`
+(`default_sm_config.yaml`, `default_metal_config.yaml`, `default_na_config.yaml`,
+`default_pep_config.yaml`, `default_ppi_config.yaml`). Any CLI flag you pass explicitly
+overrides the config for that run.
 
 ```python
 config = {
     # Optimization parameters
-    'mutation_rate': 1,
-    'learning_rate_pre': 0.2, ## Pre_iteration stage
-    'learning_rate': 0.1, ## Soft, temp, hard stages
+    'learning_rate': 0.1,       # Soft, temp, hard stages (protein target: 0.2)
+    'learning_rate_pre': 0.2,   # Pre-iteration stage (only if pre_iteration > 0)
     # Iteration stages
-    'pre_iteration': 30,      # Initial logits optimization
-    'soft_iteration': 75,     # Logits to Softmax optimization
-    'temp_iteration': 45,     # Softmax Temperature annealing
-    'hard_iteration': 5,      # Final hard encoding optimization 
-    'semi_greedy_steps': 0,   # MCMC based on iPTM score
+    'pre_iteration': 0,         # Ligand-masked warm-up (0 = off; recommended)
+    'soft_iteration': 75,       # Logits to Softmax optimization
+    'temp_iteration': 45,       # Softmax temperature annealing
+    'hard_iteration': 5,        # Final hard encoding optimization
+    'semi_greedy_steps': 0,     # MCMC based on iPTM score
+    # Sequence initialization
+    'sequence_init': 'gumbel',  # per-position softmax(scale * Gumbel) init
+    'init_gumbel_scale': 1.0,   # 1.0 for ligand/metal/NA/peptide; 2.0 for protein targets
+    # Secondary-structure bias (sampled uniformly per design)
+    'helix_loss_min': -0.3,
+    'helix_loss_max': 0.0,      # more negative = suppress helix -> push toward beta
+    # Contacts
+    'num_intra_contacts': 4,
+    'num_inter_contacts': 2,
     # Algorithm settings
     'design_algorithm': '3stages',
 }
 ```
+
+> **Note on `pre_iteration`**: the default is now **0**. The ligand-masked warm-up tends to
+> seed elongated helical binders that the model cannot refold, which lowers validated
+> success. Set `--pre_iteration 30` only to reproduce the original paper protocol.
 ---
 
 ## 🔄 Sequence Redesign

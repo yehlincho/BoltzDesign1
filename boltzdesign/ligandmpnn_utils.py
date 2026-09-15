@@ -381,8 +381,6 @@ def run_ligandmpnn_redesign(
         os.makedirs(directory, exist_ok=True)
 
     # Initialize score tracking lists
-    original_score = []
-    ligandpmpnn_redesign_score = []
 
     for pdb_path in os.listdir(pdb_dir):
         pdb_name = pdb_path.split(".pdb")[0]
@@ -422,7 +420,7 @@ def run_ligandmpnn_redesign(
                 config.save_stats = 0
                 config.chains_to_design = binder_chain
             
-                output = main(config)
+                main(config)
                 fasta_path = os.path.join(out_dir, "seqs", f"{pdb_name}.fa")
                 print(fasta_path)
                 # Read the existing fa file

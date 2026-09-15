@@ -1203,7 +1203,6 @@ def build_json_sequence(
                 }
             }
 
-            sequence_ls = list(seq)
             if modification_chain is not None and modification_ls is not None:
                 if (
                     chain_id in modification_chain

@@ -7,7 +7,6 @@ from matplotlib.animation import FuncAnimation
 import subprocess
 from Bio.PDB import MMCIFParser, PDBParser
 from pathlib import Path
-from logmd import LogMD
 from IPython.display import HTML, display
 import csv
 import gc
@@ -133,31 +132,6 @@ def get_CA_and_sequence(structure_file, chain_id="A"):
         raise ValueError(f"Chain {chain_id} not found in {structure_file}")
 
     return xyz, sequence
-
-
-def np_kabsch(a, b, return_v=False):
-    """Get alignment matrix for two sets of coordinates using numpy
-
-    Args:
-        a: First set of coordinates
-        b: Second set of coordinates
-        return_v: If True, return U matrix from SVD. If False, return rotation matrix
-
-    Returns:
-        Rotation matrix (or U matrix if return_v=True) to align coordinates
-    """
-    # Calculate covariance matrix
-    ab = np.swapaxes(a, -1, -2) @ b
-
-    # Singular value decomposition
-    u, s, vh = np.linalg.svd(ab, full_matrices=False)
-
-    # Handle reflection case
-    flip = np.linalg.det(u @ vh) < 0
-    if flip:
-        u[..., -1] = -u[..., -1]
-
-    return u if return_v else (u @ vh)
 
 
 def align_points(a, b):
@@ -421,7 +395,8 @@ def shift_motifs(motifs, length, fix_motif_pos=None, min_motif_gap=0, fix_motif_
             temp_gaps.append(gap)
             remaining_space -= gap
         gaps = temp_gaps
-        for i in range(1, len(gaps) - 1): gaps[i] += min_motif_gap
+        for i in range(1, len(gaps) - 1):
+            gaps[i] += min_motif_gap
 
     current_pos = gaps[0]
     for i, motif in enumerate(motifs):
