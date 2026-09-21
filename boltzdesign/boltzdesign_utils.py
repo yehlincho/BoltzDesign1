@@ -1,3 +1,4 @@
+import contextlib
 import copy
 import logging
 import os
@@ -131,7 +132,10 @@ def get_boltz_model(
         PairformerArgsV2() if model_version == "boltz2" else PairformerArgs()
     )
     pairformer_args.v2 = True if model_version == "boltz2" else False
-    pairformer_args.activation_checkpointing = True
+    # BOLTZDESIGN_NO_CKPT=1 trades the backward recompute for ~13x peak memory: it OOMs
+    # on an 80GB A100 at 150 aa. Kept only to reproduce that; see CHANGELOG.
+    _no_ckpt = os.environ.get("BOLTZDESIGN_NO_CKPT", "0") == "1"
+    pairformer_args.activation_checkpointing = not _no_ckpt
     # MC-dropout: the design loop already runs the model in train() mode, but the
     # checkpoint sets dropout=0.0, so train mode adds no stochasticity -> every seed
     # funnels to the same fold. BOLTZDESIGN_MC_DROPOUT>0 injects dropout into the
@@ -145,7 +149,16 @@ def get_boltz_model(
     msa_args = MSAModuleArgs(
         subsample_msa=True, num_subsampled_msa=1024, use_paired_feature=True
     )
-    msa_args.activation_checkpointing = True
+    # The pairformer OOM is triangle attention (N^3, 64 blocks); the MSA module is only
+    # 4 blocks with no such tensor, so its checkpointing is separately removable.
+    _no_msa_ckpt = _no_ckpt or os.environ.get("BOLTZDESIGN_NO_MSA_CKPT", "0") == "1"
+    msa_args.activation_checkpointing = not _no_msa_ckpt
+    if _no_ckpt:
+        print("[no-ckpt] activation checkpointing OFF (pairformer + msa)")
+    elif _no_msa_ckpt:
+        print("[no-ckpt] activation checkpointing OFF (msa module only)")
+    _ac = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16").lower()
+    print(f"[autocast] design-loop trunk forward in {_ac}")
 
     model_class = Boltz2 if model_version == "boltz2" else Boltz1
     if model_version == "boltz2":
@@ -180,6 +193,22 @@ def get_boltz_model(
             no_atom_encoder=False,
         )
     return model_module
+
+
+def _bd_autocast(scope="design"):
+    """bf16 autocast, opt-in via BOLTZDESIGN_AUTOCAST. Default fp32, which is what
+    bypassing the Lightning Trainer leaves us with; upstream boltz2 inference runs
+    bf16-mixed. "bf16" = design loop + scoring, "bf16_score" = scoring only.
+    The per-layer fp32 islands come from the model code either way."""
+    mode = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16").lower()
+    # Default "bf16" = design loop only, matching upstream boltz2 inference. Scoring is
+    # opt-in separately: it changes the numbers the filter uses and is not measured yet.
+    # BOLTZDESIGN_AUTOCAST=fp32 restores the pre-3.1 full-fp32 design loop.
+    on = ((scope == "design" and mode in ("bf16", "bfloat16", "bf16_all"))
+          or (scope == "score" and mode in ("bf16_score", "bf16_all")))
+    if on:
+        return torch.autocast("cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
 
 
 def _bd_make_optimizer(params, lr, default_factory):
@@ -784,21 +813,27 @@ def boltz_hallucination(
                 "disconnect_pairformer": disconnect_pairformer,
             }
 
-            if save_trajectory:
-                # Get model output with trajectory info
-                dict_out = boltz_model.get_distogram_confidence(
-                    batch, **confidence_args
-                )
-                traj_coords = dict_out["sample_atom_coords"][0].detach().cpu().numpy()
-                traj_plddt = dict_out["plddt"][0].detach().cpu().numpy()
-            else:
-                # Get model output without trajectory
-                if pre_run or distogram_only:
-                    dict_out, s, z, s_inputs = boltz_model.get_distogram(batch)
-                else:
+            with _bd_autocast():
+                if save_trajectory:
+                    # Get model output with trajectory info
                     dict_out = boltz_model.get_distogram_confidence(
                         batch, **confidence_args
                     )
+                    traj_coords = dict_out["sample_atom_coords"][0].detach().cpu().numpy()
+                    traj_plddt = dict_out["plddt"][0].detach().cpu().numpy()
+                else:
+                    # Get model output without trajectory
+                    if pre_run or distogram_only:
+                        dict_out, s, z, s_inputs = boltz_model.get_distogram(batch)
+                    else:
+                        dict_out = boltz_model.get_distogram_confidence(
+                            batch, **confidence_args
+                        )
+
+            # losses (softmax / logsumexp over the distogram) stay in fp32
+            for _k in ("pdistogram", "plddt", "pae", "sample_atom_coords"):
+                if _k in dict_out and torch.is_tensor(dict_out[_k]):
+                    dict_out[_k] = dict_out[_k].float()
 
             pdist = dict_out["pdistogram"].squeeze(-2)  # Shape: BxLxLxD
             mid_pts = get_mid_points(pdist).to(device)
@@ -1362,10 +1397,12 @@ def boltz_hallucination(
                 distogram_history, sequence_history,
             )
     def _run_model(boltz_model, batch, predict_args):
-        with torch.no_grad():
+        _t0 = time.time()
+        with torch.no_grad(), _bd_autocast(scope="score"):
             boltz_model.predict_args = predict_args
             output = boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
         torch.cuda.empty_cache()
+        print(f"[score] predict_step took {time.time() - _t0:.2f}s")
         return output
 
     if pre_run:

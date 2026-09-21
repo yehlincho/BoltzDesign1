@@ -1,6 +1,49 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Changed
+- The design loop now runs its trunk forward under bf16 autocast by default, which is the
+  precision upstream Boltz-2 uses for inference (`boltz/main.py:1262`). It had been fp32
+  only because `get_distogram` is a fork-only function that bypasses the Lightning trainer
+  applying that setting, so nothing ever enabled it. Measured on an A100 80GB: 1.85x per
+  iteration on a small-molecule target (FAD, 2.649 -> 1.434 s/iter, -11% memory) and 1.95x
+  on a protein target (PDL1, 3.097 -> 1.590 s/iter, -22% memory), about 1.6x end to end
+  since prep, scoring and file writing are precision-independent. Raw-design quality did
+  not degrade on either target (FAD n=13: holo/apo RMSD 6.01 -> 1.60 A, p=0.0023, holo
+  pLDDT 0.749 -> 0.844, p=0.069; PDL1 n=3: flat). Losses stay in fp32 -- the distogram,
+  pLDDT, PAE and coordinates are cast back before any softmax, top-k or log-sum-exp, and
+  the optimized logits, their gradients and the SGD update were never in the autocast
+  region. `BOLTZDESIGN_AUTOCAST=fp32` restores the previous behaviour.
+  NOT yet confirmed end to end: the quality evidence is Boltz's own metrics on designs
+  before LigandMPNN redesign, on two targets. AF3 strict success (complex pLDDT > 0.7,
+  ipAE < 10) across >=20 designs per arm with redesign on is still outstanding, so designs
+  made from here on are not precision-comparable to the existing fp32 dataset.
+
+### Added
+- `BOLTZDESIGN_AUTOCAST=bf16` runs the trunk forward under bf16 autocast, casting the
+  distogram, pLDDT, PAE and coordinates back to fp32 before the loss math; default is
+  unset, i.e. fp32. The design loop calls the model directly rather than through the
+  Lightning trainer, so upstream's `precision="bf16-mixed"` (`boltz/main.py:1262`, Boltz-2
+  only) never applied and fp32 was inherited by omission. Measured with `prec_bench.py`
+  (boltz2, FAD, 150 aa, seed 42, one A100 80GB per arm): fp32 2.325 s/iter at 6253 MiB,
+  TF32 (`BOLTZDESIGN_MATMUL_PREC=high`) 1.580 s/iter (1.47x) at 6255 MiB, bf16
+  1.431 s/iter (1.62x) at 5563 MiB. Both remain opt-in: neither is bit-identical, the
+  trajectories separate within a few steps, and the resulting designs share only 6-7%
+  sequence identity with the fp32 arm, so a yield comparison across many designs is still
+  needed before either becomes the default.
+- `BOLTZDESIGN_NO_CKPT=1` disables activation checkpointing in the Pairformer and MSA
+  modules, and `BOLTZDESIGN_NO_MSA_CKPT=1` disables it for the MSA module alone; both stay
+  enabled by default. The MSA-only variant was measured on PDL1 at 1.18x per iteration for
+  a near-doubling of peak memory (9.2 -> 18.1 GB), and stacked with bf16 it reached only
+  1.74x against bf16's own 1.95x, so the recompute is cheaper than the memory pressure. Measured with `ckpt_bench.py` (boltz2, FAD,
+  150 aa, one A100 80GB, same seed both arms): checkpointing runs at 2.322 s/iter with a
+  6.3 GB peak, and disabling it needs ~79 GB, running out of memory before the first
+  iteration finishes (+74.9 GB, 13x). The cost is triangle attention's per-layer
+  attention weights (`triangular_attention/primitives.py:191`), about 1.2 GB per block
+  across 64 blocks, so the recompute is what keeps the design loop inside 6.3 GB rather
+  than a leftover training default. The knob only exists to reproduce that result.
+
 ## [3.0.0] - 2026-09-15
 ### Fixed
 - Protein targets were validated single-sequence: AlphaFold 3 never received the target
