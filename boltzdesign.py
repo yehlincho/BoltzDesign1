@@ -381,6 +381,16 @@ Use this OR pdb_path/pdb_target_ids, not both.""",
     )
     parser.add_argument("--redo_boltz_predict", type=str2bool, default=False, help="Redo Boltz prediction")
     parser.add_argument(
+        "--save_confidence_npz",
+        type=str2bool,
+        default=False,
+        help="Save the full per-residue plddt and per-pair PAE matrices as .npz next to "
+        "each predicted structure. Off by default: the PAE array is N^2 (~170KB per "
+        "structure at 220 tokens, x2 for holo+apo, growing quadratically with size) and "
+        "nothing in the pipeline reads it back -- the confidence json keeps the scalar "
+        "scores.",
+    )
+    parser.add_argument(
         "--save_plots",
         type=str2bool,
         default=False,
@@ -598,6 +608,7 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
         save_trajectory=args.save_trajectory,
         redo_boltz_predict=args.redo_boltz_predict,
         save_plots=args.save_plots,
+        save_confidence_npz=args.save_confidence_npz,
     )
 
     print("Boltz design step completed!")

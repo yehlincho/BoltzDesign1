@@ -39,6 +39,19 @@ All notable changes to this project will be documented in this file.
   to fp32 in both codebases; bf16 reaches only the trunk and the confidence head.
 
 ### Added
+- `--save_confidence_npz` (default false) gates the full per-residue plddt and per-pair
+  PAE `.npz` files written next to every predicted structure. The PAE array is N^2 --
+  ~170 KB per structure at 220 tokens, two per design (holo+apo), growing quadratically
+  with complex size; `outputs/` had accumulated 35,118 such files totalling 159 MB.
+  Nothing in the pipeline reads them back (the only `np.load` call sites are the legacy
+  standalone scripts), and the scalar scores stay in `confidence_*.json`.
+- `BOLTZDESIGN_CONFIDENCE_FROM` restricts the confidence module to later design stages
+  when it is enabled: "soft" (default) keeps the current behaviour of running it in every
+  stage, "temp" skips it during the 75 soft iterations, "hard" runs it only in the hard
+  stage. Measured on PDL1, the soft stage then runs at 1.74 s/iter instead of ~8.6, so
+  confidence mode costs ~5 min per design instead of ~18. Whether skipping it early
+  costs AF3 success is under test.
+
 - `--show_animation` now defaults to **false** and `--save_plots` (new, default false)
   gates the per-design loss plot and the distogram/sequence animations. `show_animation`
   had defaulted to true, so every run -- including every CLI run -- built two 125-frame

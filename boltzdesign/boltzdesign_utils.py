@@ -210,6 +210,22 @@ def _bd_report(label, t0):
         print(f"[stage] {label}: {time.time() - t0:.2f}s")
 
 
+def _stage_common(common, stage):
+    """BOLTZDESIGN_CONFIDENCE_FROM restricts the confidence module to later stages:
+    "soft" (default) = every stage, as before; "temp" = skip it in the soft stage;
+    "hard" = only the hard stage. Inert when unset, and a no-op for distogram-only runs."""
+    want = os.environ.get("BOLTZDESIGN_CONFIDENCE_FROM", "soft").lower()
+    if want == "soft" or common.get("distogram_only", True):
+        return common
+    order = {"soft": 0, "temp": 1, "hard": 2}
+    if order.get(stage, 0) < order.get(want, 0):
+        out = dict(common)
+        out["distogram_only"] = True
+        print(f"[confidence-from] {stage} stage runs distogram-only (want {want})")
+        return out
+    return common
+
+
 def _bd_autocast(scope="design"):
     """bf16 autocast, opt-in via BOLTZDESIGN_AUTOCAST. Default fp32, which is what
     bypassing the Lightning Trainer leaves us with; upstream boltz2 inference runs
@@ -1264,7 +1280,7 @@ def boltz_hallucination(
                 traj_coords_list1, traj_plddt_list1,
             ) = run_design_stage(
                 batch, f"logits to softmax(T={e_soft})", soft_iteration,
-                stage1_params, common_design_params, plots, loss_history,
+                stage1_params, _stage_common(common_design_params, "soft"), plots, loss_history,
                 i_con_loss_history, con_loss_history, plddt_loss_history,
                 distogram_history, sequence_history,
             )
@@ -1290,7 +1306,7 @@ def boltz_hallucination(
                 traj_coords_list2, traj_plddt_list2,
             ) = run_design_stage(
                 batch, "softmax(T=1) to softmax(T=0.01)", temp_iteration,
-                stage2_params, common_design_params, plots, loss_history,
+                stage2_params, _stage_common(common_design_params, "temp"), plots, loss_history,
                 i_con_loss_history, con_loss_history, plddt_loss_history,
                 distogram_history, sequence_history,
             )
@@ -1697,6 +1713,7 @@ def run_boltz_design(
     num_workers=1,
     show_animation=False,
     save_plots=False,
+    save_confidence_npz=False,
     save_trajectory=False,
     redo_boltz_predict=True,
     gpu_id=0,
@@ -1859,7 +1876,8 @@ def run_boltz_design(
                 traj_plddt_list, structure, config, directories,
                 yaml_path, target_binder_input, itr, loss_scales,
                 boltz_path, boltz_model_version, alphabet,
-                redo_boltz_predict, show_animation, save_plots, save_trajectory
+                redo_boltz_predict, show_animation, save_plots,
+                save_confidence_npz, save_trajectory
             )
             
             _bd_report("process_design_results", _t_post)

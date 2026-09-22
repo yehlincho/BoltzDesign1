@@ -453,7 +453,7 @@ def extract_sequence_from_batch(batch, binder_chain_num, alphabet):
 
 
 def save_confidence_scores(
-    folder_dir, output, structure, name, model_idx=0, boltz2=True
+    folder_dir, output, structure, name, model_idx=0, boltz2=True, save_npz=False
 ):
     output_dir = os.path.join(folder_dir, f"boltz_results_{name}", "predictions", name)
 
@@ -521,12 +521,15 @@ def save_confidence_scores(
         )
         with open(json_path, "w") as f:
             json.dump(confidence_summary_dict, f, indent=4)
-        # Save plddt
-        plddt = output["plddt"]
-        plddt_path = os.path.join(output_dir, f"plddt_{name}_model_{model_idx}.npz")
-        np.savez_compressed(plddt_path, plddt=plddt.cpu().detach().numpy())
+        # Full per-residue plddt / per-pair PAE matrices. The PAE array is N^2, ~170KB
+        # per structure at 220 tokens and growing quadratically, and nothing in the
+        # pipeline reads it back -- the summary json keeps the scalar scores. Opt-in.
+        if save_npz:
+            plddt = output["plddt"]
+            plddt_path = os.path.join(output_dir, f"plddt_{name}_model_{model_idx}.npz")
+            np.savez_compressed(plddt_path, plddt=plddt.cpu().detach().numpy())
 
-    if "pae" in output:
+    if save_npz and "pae" in output:
         pae = output["pae"]
         pae_path = os.path.join(output_dir, f"pae_{name}_model_{model_idx}.npz")
         np.savez_compressed(pae_path, pae=pae.cpu().detach().numpy())
@@ -794,6 +797,7 @@ def process_design_results(
     redo_boltz_predict=True,
     show_animation=False,
     save_plots=False,
+    save_confidence_npz=False,
     save_trajectory=False,
 ):
     """Process and save design results"""
@@ -897,12 +901,14 @@ def process_design_results(
         save_confidence_scores(
             directories['results_final'], output, best_structure,
             f"{target_name}_results_itr{itr + 1}_length{config['length']}",
-            0, boltz2=(boltz_model_version == "boltz2")
+            0, boltz2=(boltz_model_version == "boltz2"),
+            save_npz=save_confidence_npz,
         )
         save_confidence_scores(
             directories['results_final_apo'], output_apo, best_structure_apo,
             f"{target_name}_results_itr{itr + 1}_length{config['length']}",
-            0, boltz2=(boltz_model_version == "boltz2")
+            0, boltz2=(boltz_model_version == "boltz2"),
+            save_npz=save_confidence_npz,
         )
     
     return rmsd
