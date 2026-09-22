@@ -3,171 +3,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Changed
-- `num_intra_contacts` is now **6 for protein targets** (`default_ppi_config.yaml`) and
-  stays 4 for small-molecule, metal, peptide and nucleic targets. The intra-chain contact
-  term asks each binder residue for its `num` best partners at least 9 apart in sequence
-  and within 14 A; protein targets present grooves and flat surfaces that admit
-  under-packed binders, while small-molecule pockets do not -- FAD designs already reach
-  25-27 non-local contacts per residue, roughly 6x the requirement, so the term is
-  saturated there. Measured at 4 designs per arm, counting designs under 2 A holo/apo
-  RMSD: PDL1 3/4 -> 4/4, BHRF1 1/4 -> 2/4 (distogram) and 0/4 -> 2/4 (confidence), while
-  FAD went 4/4 -> 2/4, which is why small molecules stay at 4. The per-type split scores
-  10/12 against 8/12 for any uniform setting, and is at least as good as the previous
-  default on every target tested.
-  Weakly supported: p = 0.64 for the split and p = 0.22 for the protein pooling, n=4 per
-  arm, and AF3 validation could not run, so this rests on Boltz self-consistency alone.
-  Pass `--num_intra_contacts 4` to restore the previous behaviour.
-- When the confidence module is enabled (`--distogram_only False`) it now runs only in
-  the temp and hard stages, and the design loop's diffusion sampler uses 50 steps instead
-  of 200. The final prediction is untouched at 200 steps, and the gradient is unaffected
-  either way because the sampler runs inside `torch.no_grad()` -- its coordinates only
-  condition the confidence head. Confidence mode goes from ~18 to ~5 minutes per design.
-  Measured across FAD, SAM, PDL1 and BHRF1 (4 designs per config, post-LigandMPNN Boltz
-  filter): confidence-everywhere at 200 steps 37/40, at 50 steps 31/34, temp+hard at 50
-  steps 32/32. In-loop pLDDT is flat from 200 down to 20 steps and PAE is stable to 50.
-  Caveats: n=4 per config, the difference is not significant (p = 0.25), and AF3
-  validation could not run, so this is "no evidence of harm and 3.5x cheaper" rather than
-  better. Restore the old behaviour with `BOLTZDESIGN_CONFIDENCE_FROM=soft` and
-  `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=200`. Confidence-mode runs from before this change
-  are not directly comparable.
-- The design loop now runs its trunk forward under bf16 autocast by default, which is the
-  precision upstream Boltz-2 uses for inference (`boltz/main.py:1262`). It had been fp32
-  only because `get_distogram` is a fork-only function that bypasses the Lightning trainer
-  applying that setting, so nothing ever enabled it. Measured on an A100 80GB: 1.85x per
-  iteration on a small-molecule target (FAD, 2.649 -> 1.434 s/iter, -11% memory) and 1.95x
-  on a protein target (PDL1, 3.097 -> 1.590 s/iter, -22% memory), about 1.6x end to end
-  since prep, scoring and file writing are precision-independent. Raw-design quality did
-  not degrade on either target (FAD n=13: holo/apo RMSD 6.01 -> 1.60 A, p=0.0023, holo
-  pLDDT 0.749 -> 0.844, p=0.069; PDL1 n=3: flat). Losses stay in fp32 -- the distogram,
-  pLDDT, PAE and coordinates are cast back before any softmax, top-k or log-sum-exp, and
-  the optimized logits, their gradients and the SGD update were never in the autocast
-  region. `BOLTZDESIGN_AUTOCAST=fp32` restores the previous behaviour. The default
-  follows the model: bf16 for **boltz2 only**, because upstream runs boltz1 prediction at
-  `precision=32` (`boltz/main.py:1262`) and boltz1 carries fewer fp32 pins (`boltz1.py`
-  has no `autocast(enabled=False)` blocks, where `boltz2.py` shields its structure
-  module). boltz1 stays fp32 unless `BOLTZDESIGN_AUTOCAST` is set explicitly.
-  NOT yet confirmed end to end: the quality evidence is Boltz's own metrics on designs
-  before LigandMPNN redesign, on two targets. AF3 strict success (complex pLDDT > 0.7,
-  ipAE < 10) across >=20 designs per arm with redesign on is still outstanding, so designs
-  made from here on are not precision-comparable to the existing fp32 dataset.
-- The final holo/apo prediction now scores on the **full MSA**. The MSA module subsamples
-  with a fresh `randperm` on every call and is not gated on `self.training`
-  (`trunkv2.py:631`), so scoring had been seeing 1024 random rows of the target's MSA --
-  a different subset each call, which both weakened the score and made protein scores vary
-  run to run for no reason. Subsampling stays on for the design loop, where it is paid 125
-  times per design instead of twice: the cached PDL1 MSA is 4096 rows, so 1024 is a real
-  4x reduction, and the MSA module is roughly 30% of a protein iteration at that depth.
-  `BOLTZDESIGN_SCORE_SUBSAMPLE=1` restores subsampled scoring. No effect on
-  small-molecule, metal or nucleic targets, whose MSA is depth 1.
-
-- The final holo/apo scoring calls also run under bf16 autocast, so the precision map now
-  matches upstream Boltz-2 everywhere the code is shared. Measured on an identical design
-  (`--init_seed` pinned, so both arms scored the same binder): 17.17 -> 15.91 s per design
-  (1.08x), with holo complex pLDDT 0.836 -> 0.831, apo 0.836 -> 0.836 and holo/apo RMSD
-  0.996 -> 0.962 A. Those shifts are smaller than the run-to-run variation of the
-  stochastic sampler at `diffusion_samples=1`, so existing confidence thresholds hold.
-  Only 1.08x because the 200-step diffusion sampler is ~90% of that call and boltz pins it
-  to fp32 in both codebases; bf16 reaches only the trunk and the confidence head.
+- Design loop and final scoring run in **bf16** (Boltz-2 only; Boltz-1 stays fp32 as
+  upstream does). ~1.85x per iteration, ~1.6x per design, 11-22% less memory.
+  `BOLTZDESIGN_AUTOCAST=fp32` reverts.
+- `num_intra_contacts` **6 for protein targets**, 4 elsewhere.
+  `--num_intra_contacts 4` reverts.
+- Confidence mode (`--distogram_only False`) runs the confidence module in the **temp and
+  hard stages only**, with **50** in-loop diffusion steps instead of 200. The final
+  prediction still uses 200. ~18 -> ~5 min per design.
+  `BOLTZDESIGN_CONFIDENCE_FROM=soft` and `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=200` revert.
+- Final prediction scores on the **full MSA**. The MSA module resampled 1024 random rows
+  on every call, so protein scores varied run to run. `BOLTZDESIGN_SCORE_SUBSAMPLE=1`
+  reverts. Design-loop subsampling is unchanged.
+- `--show_animation` defaults to **false**; the per-design loss plot and distogram /
+  sequence animations are now behind `--save_plots` (default false). Saves ~4.9 s per
+  design.
+- Full per-residue plddt and per-pair PAE `.npz` dumps are behind
+  `--save_confidence_npz` (default false).
 
 ### Added
 - `--rg_loss` now drives a differentiable radius-of-gyration penalty computed from the
-  distogram, and works in distogram-only mode. It previously fed `add_rg_loss()`, which
-  reads `sample_atom_coords` -- produced inside the sampler's `torch.no_grad()` block
-  (`diffusionv2.py:455`) -- so the term carried no gradient and setting the flag did
-  nothing. The coordinate value is still printed, marked as reported-only. Default stays
-  0.0, so behaviour is unchanged unless the flag is set.
-  Measured on BHRF1 (distogram-only, n=4/arm): `--rg_loss 0.5` took holo Rg from 17.8 to
-  13.7 A, non-local contacts from 15.4 to 22.8, and designs under 2 A holo/apo RMSD from
-  1/4 to 3/4; `2.0` behaved the same.
-  NOT a recommended default. Across three targets it redistributes rather than improves:
-  baseline, `num_intra_contacts 6`, and `rg_loss 0.5` each score exactly 8/12 designs
-  under 2 A (baseline BHRF1 1/4 PDL1 3/4 FAD 4/4; ni=6 2/4, 4/4, 2/4; rg=0.5 3/4, 2/4,
-  3/4). Use `rg_loss` on groove targets whose designs come out extended, and
-  `num_intra_contacts 6` on under-packed protein targets; leave small molecules alone.
-  A contact count below ~15 per residue (|i-j|>9, <14 A) is the diagnostic for which.
+  distogram, and works in distogram-only mode. Default 0.0. Useful on targets whose
+  binders come out extended; not a general default.
+- `--msa_subsample_depth` (default 1024), `--length_bucket` (default 0, experimental).
+- Env knobs, all default-off: `BOLTZDESIGN_NO_CKPT`, `BOLTZDESIGN_NO_MSA_CKPT`,
+  `BOLTZDESIGN_SCORE_KERNELS`, `BOLTZDESIGN_TIME_STAGES`.
 
-- `--save_confidence_npz` (default false) gates the full per-residue plddt and per-pair
-  PAE `.npz` files written next to every predicted structure. The PAE array is N^2 --
-  ~170 KB per structure at 220 tokens, two per design (holo+apo), growing quadratically
-  with complex size; `outputs/` had accumulated 35,118 such files totalling 159 MB.
-  Nothing in the pipeline reads them back (the only `np.load` call sites are the legacy
-  standalone scripts), and the scalar scores stay in `confidence_*.json`.
-- `BOLTZDESIGN_CONFIDENCE_FROM` restricts the confidence module to later design stages
-  when it is enabled: "soft" (default) keeps the current behaviour of running it in every
-  stage, "temp" skips it during the 75 soft iterations, "hard" runs it only in the hard
-  stage. Measured on PDL1, the soft stage then runs at 1.74 s/iter instead of ~8.6, so
-  confidence mode costs ~5 min per design instead of ~18. Whether skipping it early
-  costs AF3 success is under test.
+### Fixed
+- An exception while plotting used to `return None` out of `process_design_results`,
+  silently skipping the RMSD csv and the holo/apo confidence scores for that design.
+- `--rg_loss` previously fed a term computed from `sample_atom_coords`, which the sampler
+  produces under `torch.no_grad()`; it carried no gradient, so setting the flag did
+  nothing.
+- The bf16 default initially applied to Boltz-1 as well, which upstream runs at fp32.
 
-- `--show_animation` now defaults to **false** and `--save_plots` (new, default false)
-  gates the per-design loss plot and the distogram/sequence animations. `show_animation`
-  had defaulted to true, so every run -- including every CLI run -- built two 125-frame
-  GIFs plus a PNG per design and printed an IPython HTML repr to stdout. Measured on FAD:
-  `process_design_results` 4.9s -> 0.16s per design, about 2.4% of a design, with the
-  RMSD csv and confidence scores unaffected. Pass `--save_plots True` (or
-  `--show_animation True`, which implies it) to get them back.
-- Fixed: an exception while plotting used to `return None` out of
-  `process_design_results`, silently skipping the RMSD csv and the holo/apo confidence
-  scores for that design. It now reports the error and continues.
-
-- `BOLTZDESIGN_AUTOCAST=bf16` runs the trunk forward under bf16 autocast, casting the
-  distogram, pLDDT, PAE and coordinates back to fp32 before the loss math; default is
-  unset, i.e. fp32. The design loop calls the model directly rather than through the
-  Lightning trainer, so upstream's `precision="bf16-mixed"` (`boltz/main.py:1262`, Boltz-2
-  only) never applied and fp32 was inherited by omission. Measured with `prec_bench.py`
-  (boltz2, FAD, 150 aa, seed 42, one A100 80GB per arm): fp32 2.325 s/iter at 6253 MiB,
-  TF32 (`BOLTZDESIGN_MATMUL_PREC=high`) 1.580 s/iter (1.47x) at 6255 MiB, bf16
-  1.431 s/iter (1.62x) at 5563 MiB. Both remain opt-in: neither is bit-identical, the
-  trajectories separate within a few steps, and the resulting designs share only 6-7%
-  sequence identity with the fp32 arm, so a yield comparison across many designs is still
-  needed before either becomes the default.
-- `--msa_subsample_depth` (default 1024) sets how many MSA rows the design loop
-  subsamples per iteration on protein targets, so more of the MSA can be used at
-  proportional cost. The final prediction ignores it and uses every row.
-- `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=N` sets the diffusion sampling steps used *inside*
-  the design loop when the confidence module is on (`--distogram_only False`); the final
-  scoring prediction keeps 200. The sampler runs inside `torch.no_grad()`
-  (`diffusionv2.py:455`), so fewer steps cannot change the gradient -- only the
-  coordinates the confidence head reads. Swept on FAD: per sampling step the cost is
-  ~0.034 s over a ~1.8 s trunk+confidence floor, so 200 -> 50 takes the confidence mode
-  from ~8.6 to 3.47 s/iter (2.5x), which is ~18 min -> ~7.5 min per design. pLDDT loss is
-  flat across 200/100/50/20 (0.49-0.62, no trend) and PAE is stable through 50 but noisy
-  at 20 (a 0.63 outlier against 0.05-0.15), so 50 is the useful floor. n=1 design per arm
-  on one target; AF3 validation of designs made this way has not been run.
-- `--length_bucket N` snaps each design's binder length to a multiple of N (default 0,
-  off). Tested and found unnecessary for its original purpose: it was meant to let
-  compiled kernels be reused across designs, the way BindCraft2 buckets lengths to hit a
-  JAX compile cache, but our Triton compilation is not shape-bound -- a different shape
-  (apo, 169 tokens, after holo at 222) reused the compiled kernels without recompiling.
-  Kept only because batching designs would need equal shapes.
-- `BOLTZDESIGN_TIME_STAGES=1` prints the non-iteration per-design costs. Measured on a
-  quiet host (FAD 150 aa, bf16): parse_schema 0.15 s, get_batch 0.2 s (tokenize 0.01,
-  featurize 0.2), the holo/apo rebuild 0.7-1.0 s, `process_design_results` 4.9 s and
-  `cleanup_iteration` 0.5 s -- about 6.7 s of overhead per design, or 3% of a 125-iteration
-  design. Earlier figures of 20-84 s came from runs sharing the host with other
-  benchmarks; under that load the CPU-side stages inflate by up to 100x. With overhead
-  measured, a design is ~203 s and 89% of it is the design loop itself.
-
-- `BOLTZDESIGN_SCORE_KERNELS=1` enables the fused cuequivariance/trifast pair-track
-  kernels for the scoring call only, scoped with try/finally so the design loop keeps the
-  plain path it needs for backward. Upstream passes `use_kernels=True` for prediction and
-  we never did; the packages and an sm_80 card are already present. Measured and left OFF:
-  scoring went 17.10 -> 43.42 s (0.39x) because the first call pays ~26 s of Triton JIT
-  compilation; the second call, at 8.51 s, was the fastest single call measured, so the
-  kernels themselves are fine and only the compile cost is not amortisable over two calls
-  per design. Scores were unaffected (holo 0.836 / 0.831 / 0.834 across arms on an
-  identical design). A warm Triton cache across designs would change this.
-- `BOLTZDESIGN_NO_CKPT=1` disables activation checkpointing in the Pairformer and MSA
-  modules, and `BOLTZDESIGN_NO_MSA_CKPT=1` disables it for the MSA module alone; both stay
-  enabled by default. The MSA-only variant was measured on PDL1 at 1.18x per iteration for
-  a near-doubling of peak memory (9.2 -> 18.1 GB), and stacked with bf16 it reached only
-  1.74x against bf16's own 1.95x, so the recompute is cheaper than the memory pressure. Measured with `ckpt_bench.py` (boltz2, FAD,
-  150 aa, one A100 80GB, same seed both arms): checkpointing runs at 2.322 s/iter with a
-  6.3 GB peak, and disabling it needs ~79 GB, running out of memory before the first
-  iteration finishes (+74.9 GB, 13x). The cost is triangle attention's per-layer
-  attention weights (`triangular_attention/primitives.py:191`), about 1.2 GB per block
-  across 64 blocks, so the recompute is what keeps the design loop inside 6.3 GB rather
-  than a leftover training default. The knob only exists to reproduce that result.
+Measurements, per-target results and the statistics behind each change are in the
+commit messages.
 
 ## [3.0.0] - 2026-09-15
 ### Fixed
