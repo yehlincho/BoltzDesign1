@@ -157,8 +157,8 @@ def get_boltz_model(
         print("[no-ckpt] activation checkpointing OFF (pairformer + msa)")
     elif _no_msa_ckpt:
         print("[no-ckpt] activation checkpointing OFF (msa module only)")
-    _ac = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16").lower()
-    print(f"[autocast] design-loop trunk forward in {_ac}")
+    _ac = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16_all").lower()
+    print(f"[autocast] mode {_ac}")
 
     model_class = Boltz2 if model_version == "boltz2" else Boltz1
     if model_version == "boltz2":
@@ -200,10 +200,10 @@ def _bd_autocast(scope="design"):
     bypassing the Lightning Trainer leaves us with; upstream boltz2 inference runs
     bf16-mixed. "bf16" = design loop + scoring, "bf16_score" = scoring only.
     The per-layer fp32 islands come from the model code either way."""
-    mode = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16").lower()
-    # Default "bf16" = design loop only, matching upstream boltz2 inference. Scoring is
-    # opt-in separately: it changes the numbers the filter uses and is not measured yet.
-    # BOLTZDESIGN_AUTOCAST=fp32 restores the pre-3.1 full-fp32 design loop.
+    mode = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16_all").lower()
+    # Default "bf16_all" = design loop + scoring, matching upstream boltz2's bf16-mixed
+    # everywhere. The per-layer fp32 islands come from the model code either way.
+    # "bf16" = design loop only, "bf16_score" = scoring only, "fp32" = neither.
     on = ((scope == "design" and mode in ("bf16", "bfloat16", "bf16_all"))
           or (scope == "score" and mode in ("bf16_score", "bf16_all")))
     if on:
@@ -1397,12 +1397,23 @@ def boltz_hallucination(
                 distogram_history, sequence_history,
             )
     def _run_model(boltz_model, batch, predict_args):
+        # Fused pair-track kernels (cuequivariance/trifast) have no backward, so the
+        # design loop cannot use them -- but scoring is no_grad/eval, so it can.
+        # Scoped to this call and restored after. BOLTZDESIGN_SCORE_KERNELS=1.
+        _kern = os.environ.get("BOLTZDESIGN_SCORE_KERNELS", "0") == "1"
+        _prev = getattr(boltz_model, "use_kernels", False)
+        if _kern:
+            boltz_model.use_kernels = True
         _t0 = time.time()
-        with torch.no_grad(), _bd_autocast(scope="score"):
-            boltz_model.predict_args = predict_args
-            output = boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
+        try:
+            with torch.no_grad(), _bd_autocast(scope="score"):
+                boltz_model.predict_args = predict_args
+                output = boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
+        finally:
+            boltz_model.use_kernels = _prev
         torch.cuda.empty_cache()
-        print(f"[score] predict_step took {time.time() - _t0:.2f}s")
+        print(f"[score] predict_step took {time.time() - _t0:.2f}s"
+              + (" (kernels)" if _kern else ""))
         return output
 
     if pre_run:

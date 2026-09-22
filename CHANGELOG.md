@@ -19,6 +19,14 @@ All notable changes to this project will be documented in this file.
   before LigandMPNN redesign, on two targets. AF3 strict success (complex pLDDT > 0.7,
   ipAE < 10) across >=20 designs per arm with redesign on is still outstanding, so designs
   made from here on are not precision-comparable to the existing fp32 dataset.
+- The final holo/apo scoring calls also run under bf16 autocast, so the precision map now
+  matches upstream Boltz-2 everywhere the code is shared. Measured on an identical design
+  (`--init_seed` pinned, so both arms scored the same binder): 17.17 -> 15.91 s per design
+  (1.08x), with holo complex pLDDT 0.836 -> 0.831, apo 0.836 -> 0.836 and holo/apo RMSD
+  0.996 -> 0.962 A. Those shifts are smaller than the run-to-run variation of the
+  stochastic sampler at `diffusion_samples=1`, so existing confidence thresholds hold.
+  Only 1.08x because the 200-step diffusion sampler is ~90% of that call and boltz pins it
+  to fp32 in both codebases; bf16 reaches only the trunk and the confidence head.
 
 ### Added
 - `BOLTZDESIGN_AUTOCAST=bf16` runs the trunk forward under bf16 autocast, casting the
@@ -32,6 +40,11 @@ All notable changes to this project will be documented in this file.
   trajectories separate within a few steps, and the resulting designs share only 6-7%
   sequence identity with the fp32 arm, so a yield comparison across many designs is still
   needed before either becomes the default.
+- `BOLTZDESIGN_SCORE_KERNELS=1` enables the fused cuequivariance/trifast pair-track
+  kernels for the scoring call only, scoped with try/finally so the design loop keeps the
+  plain path it needs for backward. Upstream passes `use_kernels=True` for prediction and
+  we never did; the packages and an sm_80 card are already present. Default off pending
+  measurement -- BoltzHunter previously rejected trifast as ~9% slower at 150 aa.
 - `BOLTZDESIGN_NO_CKPT=1` disables activation checkpointing in the Pairformer and MSA
   modules, and `BOLTZDESIGN_NO_MSA_CKPT=1` disables it for the MSA module alone; both stay
   enabled by default. The MSA-only variant was measured on PDL1 at 1.18x per iteration for

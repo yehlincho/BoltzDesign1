@@ -17,7 +17,11 @@ sys.path.insert(0, HERE)
 import boltz2_sweep as bs
 
 SOFT, TEMP, HARD = 30, 15, 2
-ARMS = {"score_fp32": {}, "score_bf16": {"BOLTZDESIGN_AUTOCAST": "bf16_score"}}
+# both arms run the design loop in bf16 (the new default) so only scoring differs
+ARMS = {"score_fp32": {"BOLTZDESIGN_AUTOCAST": "bf16"},
+        "score_bf16": {"BOLTZDESIGN_AUTOCAST": "bf16_all"},
+        "score_bf16_kernels": {"BOLTZDESIGN_AUTOCAST": "bf16_all",
+                               "BOLTZDESIGN_SCORE_KERNELS": "1"}}
 
 
 def cmd(gpu, suffix):
@@ -28,7 +32,7 @@ def cmd(gpu, suffix):
         "learning_rate": "0.1", "num_intra_contacts": "6",
         "helix_loss_min": "-0.3", "helix_loss_max": "-0.3",
         "soft_iteration": str(SOFT), "temp_iteration": str(TEMP), "hard_iteration": str(HARD),
-        "design_samples": "1", "num_designs": "1",
+        "design_samples": "1", "num_designs": "1", "init_seed": "42",
         "run_boltz_design": "True", "run_ligandmpnn": "False",
         "run_alphafold": "False", "run_rosetta": "False",
         "gpu_id": str(gpu), "suffix": suffix, "work_dir": HERE,
@@ -78,25 +82,27 @@ def main():
         P[arm] = parse(run(a.gpu, arm, a.seed))
 
     L = ["============ SCORING-PRECISION BENCHMARK (boltz2) ============",
-         f"FAD 150aa | design loop fp32 in both arms | seed {a.seed} | gpu {a.gpu}", ""]
+         f"FAD 150aa | design loop bf16 in both arms | seed {a.seed} | gpu {a.gpu}", ""]
     for arm in ARMS:
         d = P[arm]
         tot = sum(d["score_s"])
         L.append(f"{arm:11} predict_step calls {len(d['score_s'])} | "
                  f"total {tot:7.2f}s | each {[round(x,2) for x in d['score_s']]}")
-    f, b = P["score_fp32"], P["score_bf16"]
-    tf, tb = sum(f["score_s"]), sum(b["score_s"])
-    L += ["",
-          f"speedup on scoring: {tf/tb:.2f}x  ({tf:.2f}s -> {tb:.2f}s, saved {tf-tb:.2f}s/design)",
-          "",
-          "did the scores move? (identical design, so this is scoring precision alone)",
-          f"  holo complex pLDDT : {f['holo']} -> {b['holo']}",
-          f"  apo  complex pLDDT : {f['apo']} -> {b['apo']}",
-          f"  RMSD               : {f['rmsd']} -> {b['rmsd']}",
-          f"  same design?         {'YES' if f['seq'] == b['seq'] else 'NO — designs differ, comparison invalid'}",
-          "",
-          f"design loop s/iter: fp32 arm {np.mean(f['iters'][2:]):.3f}  bf16-score arm "
-          f"{np.mean(b['iters'][2:]):.3f}  (should match; loop is fp32 in both)",
+    base = sum(P["score_fp32"]["score_s"])
+    L += ["", "scoring speed:"]
+    for arm in ARMS:
+        t = sum(P[arm]["score_s"])
+        L.append(f"  {arm:20} {t:6.2f}s  {base/t if t else float('nan'):.2f}x  "
+                 f"saved {base-t:+.2f}s/design")
+    L += ["", "did the scores move? (init_seed pinned -> same design in every arm)"]
+    ref = P["score_fp32"]
+    for arm in ARMS:
+        d = P[arm]
+        L.append(f"  {arm:20} holo={d['holo']} apo={d['apo']} rmsd="
+                 f"{(round(d['rmsd'],3) if d['rmsd'] is not None else None)}  "
+                 f"same design as arm1: {'YES' if d['seq'] == ref['seq'] else 'NO'}")
+    L += ["", "design-loop s/iter (bf16 in every arm, should match):",
+          "  " + "  ".join(f"{arm}={np.mean(P[arm]['iters'][2:]):.3f}" for arm in ARMS),
           "=" * 62]
     rep = "\n".join(L)
     print(rep)
