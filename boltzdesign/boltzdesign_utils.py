@@ -162,9 +162,12 @@ def get_boltz_model(
         print("[no-ckpt] activation checkpointing OFF (pairformer + msa)")
     elif _no_msa_ckpt:
         print("[no-ckpt] activation checkpointing OFF (msa module only)")
-    _ac = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16_all").lower()
+    _ac = os.environ.get("BOLTZDESIGN_AUTOCAST",
+                         "bf16_all" if model_version == "boltz2" else "fp32").lower()
     print(f"[autocast] mode {_ac}")
 
+    global _BD_MODEL_VERSION
+    _BD_MODEL_VERSION = model_version
     model_class = Boltz2 if model_version == "boltz2" else Boltz1
     if model_version == "boltz2":
         model_module = model_class.load_from_checkpoint(
@@ -210,6 +213,9 @@ def _bd_report(label, t0):
         print(f"[stage] {label}: {time.time() - t0:.2f}s")
 
 
+_BD_MODEL_VERSION = "boltz2"
+
+
 def _stage_common(common, stage):
     """BOLTZDESIGN_CONFIDENCE_FROM restricts the confidence module to later stages:
     "soft" (default) = every stage, as before; "temp" = skip it in the soft stage;
@@ -231,7 +237,11 @@ def _bd_autocast(scope="design"):
     bypassing the Lightning Trainer leaves us with; upstream boltz2 inference runs
     bf16-mixed. "bf16" = design loop + scoring, "bf16_score" = scoring only.
     The per-layer fp32 islands come from the model code either way."""
-    mode = os.environ.get("BOLTZDESIGN_AUTOCAST", "bf16_all").lower()
+    # Upstream runs boltz2 prediction as bf16-mixed but boltz1 as precision=32
+    # (boltz/main.py:1262), and boltz1's modules carry fewer fp32 pins, so the default
+    # follows the model. An explicit BOLTZDESIGN_AUTOCAST overrides for either model.
+    _default = "bf16_all" if _BD_MODEL_VERSION == "boltz2" else "fp32"
+    mode = os.environ.get("BOLTZDESIGN_AUTOCAST", _default).lower()
     # Default "bf16_all" = design loop + scoring, matching upstream boltz2's bf16-mixed
     # everywhere. The per-layer fp32 islands come from the model code either way.
     # "bf16" = design loop only, "bf16_score" = scoring only, "fp32" = neither.

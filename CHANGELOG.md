@@ -14,7 +14,11 @@ All notable changes to this project will be documented in this file.
   pLDDT 0.749 -> 0.844, p=0.069; PDL1 n=3: flat). Losses stay in fp32 -- the distogram,
   pLDDT, PAE and coordinates are cast back before any softmax, top-k or log-sum-exp, and
   the optimized logits, their gradients and the SGD update were never in the autocast
-  region. `BOLTZDESIGN_AUTOCAST=fp32` restores the previous behaviour.
+  region. `BOLTZDESIGN_AUTOCAST=fp32` restores the previous behaviour. The default
+  follows the model: bf16 for **boltz2 only**, because upstream runs boltz1 prediction at
+  `precision=32` (`boltz/main.py:1262`) and boltz1 carries fewer fp32 pins (`boltz1.py`
+  has no `autocast(enabled=False)` blocks, where `boltz2.py` shields its structure
+  module). boltz1 stays fp32 unless `BOLTZDESIGN_AUTOCAST` is set explicitly.
   NOT yet confirmed end to end: the quality evidence is Boltz's own metrics on designs
   before LigandMPNN redesign, on two targets. AF3 strict success (complex pLDDT > 0.7,
   ipAE < 10) across >=20 designs per arm with redesign on is still outstanding, so designs
