@@ -19,6 +19,16 @@ All notable changes to this project will be documented in this file.
   before LigandMPNN redesign, on two targets. AF3 strict success (complex pLDDT > 0.7,
   ipAE < 10) across >=20 designs per arm with redesign on is still outstanding, so designs
   made from here on are not precision-comparable to the existing fp32 dataset.
+- The final holo/apo prediction now scores on the **full MSA**. The MSA module subsamples
+  with a fresh `randperm` on every call and is not gated on `self.training`
+  (`trunkv2.py:631`), so scoring had been seeing 1024 random rows of the target's MSA --
+  a different subset each call, which both weakened the score and made protein scores vary
+  run to run for no reason. Subsampling stays on for the design loop, where it is paid 125
+  times per design instead of twice: the cached PDL1 MSA is 4096 rows, so 1024 is a real
+  4x reduction, and the MSA module is roughly 30% of a protein iteration at that depth.
+  `BOLTZDESIGN_SCORE_SUBSAMPLE=1` restores subsampled scoring. No effect on
+  small-molecule, metal or nucleic targets, whose MSA is depth 1.
+
 - The final holo/apo scoring calls also run under bf16 autocast, so the precision map now
   matches upstream Boltz-2 everywhere the code is shared. Measured on an identical design
   (`--init_seed` pinned, so both arms scored the same binder): 17.17 -> 15.91 s per design
@@ -40,11 +50,42 @@ All notable changes to this project will be documented in this file.
   trajectories separate within a few steps, and the resulting designs share only 6-7%
   sequence identity with the fp32 arm, so a yield comparison across many designs is still
   needed before either becomes the default.
+- `--msa_subsample_depth` (default 1024) sets how many MSA rows the design loop
+  subsamples per iteration on protein targets, so more of the MSA can be used at
+  proportional cost. The final prediction ignores it and uses every row.
+- `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=N` sets the diffusion sampling steps used *inside*
+  the design loop when the confidence module is on (`--distogram_only False`); the final
+  scoring prediction keeps 200. The sampler runs inside `torch.no_grad()`
+  (`diffusionv2.py:455`), so fewer steps cannot change the gradient -- only the
+  coordinates the confidence head reads. Swept on FAD: per sampling step the cost is
+  ~0.034 s over a ~1.8 s trunk+confidence floor, so 200 -> 50 takes the confidence mode
+  from ~8.6 to 3.47 s/iter (2.5x), which is ~18 min -> ~7.5 min per design. pLDDT loss is
+  flat across 200/100/50/20 (0.49-0.62, no trend) and PAE is stable through 50 but noisy
+  at 20 (a 0.63 outlier against 0.05-0.15), so 50 is the useful floor. n=1 design per arm
+  on one target; AF3 validation of designs made this way has not been run.
+- `--length_bucket N` snaps each design's binder length to a multiple of N (default 0,
+  off). Tested and found unnecessary for its original purpose: it was meant to let
+  compiled kernels be reused across designs, the way BindCraft2 buckets lengths to hit a
+  JAX compile cache, but our Triton compilation is not shape-bound -- a different shape
+  (apo, 169 tokens, after holo at 222) reused the compiled kernels without recompiling.
+  Kept only because batching designs would need equal shapes.
+- `BOLTZDESIGN_TIME_STAGES=1` prints the non-iteration per-design costs. Measured on a
+  quiet host (FAD 150 aa, bf16): parse_schema 0.15 s, get_batch 0.2 s (tokenize 0.01,
+  featurize 0.2), the holo/apo rebuild 0.7-1.0 s, `process_design_results` 4.9 s and
+  `cleanup_iteration` 0.5 s -- about 6.7 s of overhead per design, or 3% of a 125-iteration
+  design. Earlier figures of 20-84 s came from runs sharing the host with other
+  benchmarks; under that load the CPU-side stages inflate by up to 100x. With overhead
+  measured, a design is ~203 s and 89% of it is the design loop itself.
+
 - `BOLTZDESIGN_SCORE_KERNELS=1` enables the fused cuequivariance/trifast pair-track
   kernels for the scoring call only, scoped with try/finally so the design loop keeps the
   plain path it needs for backward. Upstream passes `use_kernels=True` for prediction and
-  we never did; the packages and an sm_80 card are already present. Default off pending
-  measurement -- BoltzHunter previously rejected trifast as ~9% slower at 150 aa.
+  we never did; the packages and an sm_80 card are already present. Measured and left OFF:
+  scoring went 17.10 -> 43.42 s (0.39x) because the first call pays ~26 s of Triton JIT
+  compilation; the second call, at 8.51 s, was the fastest single call measured, so the
+  kernels themselves are fine and only the compile cost is not amortisable over two calls
+  per design. Scores were unaffected (holo 0.836 / 0.831 / 0.834 across arms on an
+  identical design). A warm Triton cache across designs would change this.
 - `BOLTZDESIGN_NO_CKPT=1` disables activation checkpointing in the Pairformer and MSA
   modules, and `BOLTZDESIGN_NO_MSA_CKPT=1` disables it for the MSA module alone; both stay
   enabled by default. The MSA-only variant was measured on PDL1 at 1.18x per iteration for

@@ -128,6 +128,22 @@ Use this OR pdb_path/pdb_target_ids, not both.""",
     )
     parser.add_argument("--cyclic", type=str2bool, default=False, help="Use cyclic design")
     parser.add_argument("--msa_max_seqs", type=int, default=4096, help="Maximum MSA sequences")
+    parser.add_argument(
+        "--length_bucket",
+        type=int,
+        default=0,
+        help="Snap each design's binder length to a multiple of this (0 = off). Makes "
+        "tensor shapes repeat across designs, which is what lets compiled kernels be "
+        "reused and designs be batched. Experimental.",
+    )
+    parser.add_argument(
+        "--msa_subsample_depth",
+        type=int,
+        default=1024,
+        help="MSA rows the design loop subsamples per iteration (protein targets; "
+        "raise to use more of the MSA at proportional cost). The final prediction "
+        "always uses the full MSA.",
+    )
     parser.add_argument("--suffix", type=str, default="0", help="Suffix for the output directory")
     parser.add_argument("--motif_scaffolding", type=str2bool, default=False, help="Use motif scaffolding")
 
@@ -417,6 +433,7 @@ def load_boltz_model(args, device):
         args.boltz_model_version,
         grad_enabled=True,
         no_potentials=not args.use_potential,
+        msa_subsample_depth=args.msa_subsample_depth,
     )
     boltz_model.train()
     return boltz_model, predict_args
@@ -495,6 +512,7 @@ def update_config_with_args(config, args):
         "e_soft": args.e_soft,
         "e_soft_1": args.e_soft_1,
         "e_soft_2": args.e_soft_2,
+        "length_bucket": args.length_bucket,
         "length_min": args.length_min,
         "length_max": args.length_max,
         "inter_chain_cutoff": args.inter_chain_cutoff,

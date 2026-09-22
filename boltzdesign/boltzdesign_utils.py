@@ -110,7 +110,8 @@ def get_boltz_model(
     device: Optional[str] = None,
     model_version: str = "boltz2",
     grad_enabled=True,
-    no_potentials = True
+    no_potentials = True,
+    msa_subsample_depth: int = 1024,
 ) -> Boltz2:
     torch.set_grad_enabled(grad_enabled)
     # TF32 matmul is env-controlled (default "highest"=full FP32, unchanged behavior).
@@ -146,8 +147,12 @@ def get_boltz_model(
         pairformer_args.dropout = _mcd
         print(f"[MC-dropout] pairformer dropout set to {_mcd}")
 
+    # Subsampling keeps the 125-iteration design loop affordable on protein targets;
+    # depth is user-settable. The final prediction ignores it and uses every row.
     msa_args = MSAModuleArgs(
-        subsample_msa=True, num_subsampled_msa=1024, use_paired_feature=True
+        subsample_msa=True,
+        num_subsampled_msa=msa_subsample_depth,
+        use_paired_feature=True,
     )
     # The pairformer OOM is triangle attention (N^3, 64 blocks); the MSA module is only
     # 4 blocks with no such tensor, so its checkpointing is separately removable.
@@ -193,6 +198,16 @@ def get_boltz_model(
             no_atom_encoder=False,
         )
     return model_module
+
+
+def _bd_t():
+    """timestamp for the per-design stage timers (BOLTZDESIGN_TIME_STAGES=1)"""
+    return time.time() if os.environ.get("BOLTZDESIGN_TIME_STAGES", "0") == "1" else None
+
+
+def _bd_report(label, t0):
+    if t0 is not None:
+        print(f"[stage] {label}: {time.time() - t0:.2f}s")
 
 
 def _bd_autocast(scope="design"):
@@ -351,6 +366,7 @@ def boltz_hallucination(
         contact_positions = None
 
     name = yaml_path.stem
+    _t_parse = _bd_t()
     print("data", data)
     target = parse_boltz_schema(
         name,
@@ -359,6 +375,7 @@ def boltz_hallucination(
         ccd_path,
         boltz_2=True if boltz_model_version == "boltz2" else False,
     )
+    _bd_report("parse_schema(design)", _t_parse)
     device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
     boltz_model.train() if set_train else boltz_model.eval()
     print(f"set in {'train' if set_train else 'eval'} mode")
@@ -398,6 +415,7 @@ def boltz_hallucination(
         keep_record=False,
         boltz_model_version=None,
     ):
+        _t_gb0 = _bd_t()
         structure = target.structure
 
         coords = np.array([(atom["coords"],) for atom in structure.atoms], dtype=Coords)
@@ -449,8 +467,12 @@ def boltz_hallucination(
             tokenizer = BoltzTokenizer()
             featurizer = BoltzFeaturizer()
 
+        _bd_report("  get_batch.structure+msa", _t_gb0)
+        _t_gb1 = _bd_t()
         tokenized = tokenizer.tokenize(input)
 
+        _bd_report("  get_batch.tokenize", _t_gb1)
+        _t_gb2 = _bd_t()
         seed = 42
         random = np.random.default_rng(seed)
         if boltz_model_version == "boltz2":
@@ -460,6 +482,8 @@ def boltz_hallucination(
             mol_names = set(tokenized.tokens["res_name"].tolist())
             mol_names = mol_names - set(molecules.keys())
             molecules.update(load_molecules(ccd_path, mol_names))
+        _bd_report("  get_batch.molecules", _t_gb2)
+        _t_gb3 = _bd_t()
         options = target.record.inference_options
         if pocket_conditioning:
             pocket_constraints = options.pocket_constraints
@@ -531,6 +555,7 @@ def boltz_hallucination(
         if keep_record:
             batch["record"] = target.record
 
+        _bd_report("  get_batch.featurize", _t_gb3)
         return batch, structure
 
 
@@ -546,6 +571,7 @@ def boltz_hallucination(
                     batch[key][:, :, m_['shifted_start']:m_['shifted_end']] = orig[:, :, m_['shifted_start']:m_['shifted_end']]
         return batch
 
+    _t_feat = _bd_t()
     batch, structure = get_batch(
         target,
         max_seqs=msa_max_seqs,
@@ -553,6 +579,7 @@ def boltz_hallucination(
         pocket_conditioning=pocket_conditioning,
         boltz_model_version=boltz_model_version,
     )
+    _bd_report("get_batch(design)", _t_feat)
     batch = {key: value.unsqueeze(0).to(device) for key, value in batch.items()}
     if boltz_model_version == "boltz2":
         batch["msa"] = torch.nn.functional.one_hot(batch["msa"], num_classes=33)
@@ -805,7 +832,11 @@ def boltz_hallucination(
             # Common arguments for get_distogram_confidence
             confidence_args = {
                 "recycling_steps": predict_args["recycling_steps"],
-                "num_sampling_steps": predict_args["sampling_steps"],
+                # Design-loop-only override: the sampler is inside no_grad, so fewer steps
+                # cannot affect the gradient -- only the coords the confidence head reads.
+                # The final scoring prediction keeps predict_args["sampling_steps"].
+                "num_sampling_steps": int(os.environ.get("BOLTZDESIGN_DESIGN_SAMPLING_STEPS", 0))
+                or predict_args["sampling_steps"],
                 "multiplicity_diffusion_train": 1,
                 "diffusion_samples": predict_args["diffusion_samples"],
                 "run_confidence_sequentially": True,
@@ -1404,6 +1435,16 @@ def boltz_hallucination(
         _prev = getattr(boltz_model, "use_kernels", False)
         if _kern:
             boltz_model.use_kernels = True
+        # Score on the FULL MSA, like upstream. The MSA module subsamples with a fresh
+        # randperm on every call and is not gated on training, so scoring otherwise saw
+        # 1024 random rows and protein scores varied run to run.
+        _msa_mod = getattr(boltz_model, "msa_module", None)
+        _msa_mod = getattr(_msa_mod, "_orig_mod", _msa_mod)
+        _sub_prev = getattr(_msa_mod, "subsample_msa", None)
+        if _msa_mod is not None and _sub_prev and os.environ.get(
+            "BOLTZDESIGN_SCORE_SUBSAMPLE", "0") != "1":
+            _msa_mod.subsample_msa = False
+        _sub_state = getattr(_msa_mod, "subsample_msa", "n/a")
         _t0 = time.time()
         try:
             with torch.no_grad(), _bd_autocast(scope="score"):
@@ -1411,9 +1452,12 @@ def boltz_hallucination(
                 output = boltz_model.predict_step(batch, batch_idx=0, dataloader_idx=0)
         finally:
             boltz_model.use_kernels = _prev
+            if _msa_mod is not None and _sub_prev is not None:
+                _msa_mod.subsample_msa = _sub_prev
         torch.cuda.empty_cache()
         print(f"[score] predict_step took {time.time() - _t0:.2f}s"
-              + (" (kernels)" if _kern else ""))
+              + (" (kernels)" if _kern else "")
+              + f" [msa subsample={_sub_state}]")
         return output
 
     if pre_run:
@@ -1512,10 +1556,12 @@ def boltz_hallucination(
         }
         return best_batch, best_batch_apo, best_structure, best_structure_apo
     
+    _t_upd = _bd_t()
     best_batch, best_batch_apo, best_structure, best_structure_apo = _update_batches(
         data, data_apo, boltz_model_version=boltz_model_version
     )
     
+    _bd_report("update_batches(holo+apo)", _t_upd)
     if motif_scaffolding and shifted_motifs:
         best_batch = motif_scaffolding_template(
             best_batch, shifted_motifs
@@ -1721,7 +1767,7 @@ def run_boltz_design(
     # Filter config for boltz_hallucination
     filtered_config = {
         k: v for k, v in config.items()
-        if k not in ["helix_loss_min", "helix_loss_max", "length_min", "length_max", "motifs", "fix_motif_pos", "min_motif_gap", "fix_motif_gap_to_min"]
+        if k not in ["helix_loss_min", "helix_loss_max", "length_min", "length_max", "length_bucket", "motifs", "fix_motif_pos", "min_motif_gap", "fix_motif_gap_to_min"]
     }
     
     # Process each YAML file
@@ -1734,8 +1780,15 @@ def run_boltz_design(
         for itr in range(design_samples):
             aggressive_memory_cleanup()
             
-            # Randomize length and motif shift
+            # Randomize length and motif shift. length_bucket>0 snaps the draw to a
+            # multiple so shapes repeat across designs (needed for batching designs).
             config["length"] = random.randint(config["length_min"], config["length_max"])
+            _bucket = int(config.get("length_bucket") or 0)
+            if _bucket > 1:
+                _snapped = max(_bucket, int(round(config["length"] / _bucket)) * _bucket)
+                _snapped = min(max(_snapped, config["length_min"]), config["length_max"])
+                print(f"[length-bucket] {config['length']} -> {_snapped} (bucket {_bucket})")
+                config["length"] = _snapped
             filtered_config["length"] = config["length"]
             
             if config.get("motif_scaffolding"):
@@ -1796,6 +1849,7 @@ def run_boltz_design(
             traj_plddt_list.extend(traj_plddt_list_2)
             
             # Process and save results
+            _t_post = _bd_t()
             process_design_results(
                 output, output_apo, best_batch, best_batch_apo,
                 best_structure, best_structure_apo, distogram_history,
@@ -1807,6 +1861,8 @@ def run_boltz_design(
                 redo_boltz_predict, show_animation, save_trajectory
             )
             
+            _bd_report("process_design_results", _t_post)
+            _t_cln = _bd_t()
             # Cleanup
             cleanup_iteration(
                 output, output_apo, best_batch, best_batch_apo,
@@ -1816,3 +1872,4 @@ def run_boltz_design(
                 traj_plddt_list_2, structure, distogram_history,
                 sequence_history, loss_history, traj_coords_list, traj_plddt_list
             )
+            _bd_report("cleanup_iteration", _t_cln)
