@@ -3,42 +3,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Changed
-- Design loop and final scoring run in **bf16** (Boltz-2 only; Boltz-1 stays fp32 as
-  upstream does). ~1.85x per iteration, ~1.6x per design, 11-22% less memory.
-  `BOLTZDESIGN_AUTOCAST=fp32` reverts.
-- `num_intra_contacts` **6 for protein targets**, 4 elsewhere.
-  `--num_intra_contacts 4` reverts.
-- Confidence mode (`--distogram_only False`) runs the confidence module in the **temp and
-  hard stages only**, with **50** in-loop diffusion steps instead of 200. The final
-  prediction still uses 200. ~18 -> ~5 min per design.
-  `BOLTZDESIGN_CONFIDENCE_FROM=soft` and `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=200` revert.
-- Final prediction scores on the **full MSA**. The MSA module resampled 1024 random rows
-  on every call, so protein scores varied run to run. `BOLTZDESIGN_SCORE_SUBSAMPLE=1`
-  reverts. Design-loop subsampling is unchanged.
-- `--show_animation` defaults to **false**; the per-design loss plot and distogram /
-  sequence animations are now behind `--save_plots` (default false). Saves ~4.9 s per
-  design.
-- Full per-residue plddt and per-pair PAE `.npz` dumps are behind
-  `--save_confidence_npz` (default false).
+- bf16 for the design loop and scoring (Boltz-2 only). ~1.6x faster per design, 11-22%
+  less memory. Revert: `BOLTZDESIGN_AUTOCAST=fp32`.
+- `num_intra_contacts` 6 for protein targets, 4 elsewhere. Revert: `--num_intra_contacts 4`.
+- Confidence mode: module runs in the temp/hard stages only, 50 in-loop diffusion steps
+  instead of 200 (final prediction still 200). ~18 -> ~5 min per design. Revert:
+  `BOLTZDESIGN_CONFIDENCE_FROM=soft`, `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=200`.
+- Final prediction scores on the full MSA instead of 1024 rows resampled per call.
+  Revert: `BOLTZDESIGN_SCORE_SUBSAMPLE=1`.
+- Loss plots and animations off by default (`--save_plots`, `--show_animation`).
+- plddt/PAE `.npz` dumps off by default (`--save_confidence_npz`).
 
 ### Added
-- `--rg_loss` now drives a differentiable radius-of-gyration penalty computed from the
-  distogram, and works in distogram-only mode. Default 0.0. Useful on targets whose
-  binders come out extended; not a general default.
-- `--msa_subsample_depth` (default 1024), `--length_bucket` (default 0, experimental).
-- Env knobs, all default-off: `BOLTZDESIGN_NO_CKPT`, `BOLTZDESIGN_NO_MSA_CKPT`,
-  `BOLTZDESIGN_SCORE_KERNELS`, `BOLTZDESIGN_TIME_STAGES`.
+- `--rg_loss` now works: a differentiable Rg penalty from the distogram. Default 0.0.
+- `--msa_subsample_depth`, `--length_bucket`, and default-off env knobs
+  `BOLTZDESIGN_NO_CKPT`, `_NO_MSA_CKPT`, `_SCORE_KERNELS`, `_TIME_STAGES`.
 
 ### Fixed
-- An exception while plotting used to `return None` out of `process_design_results`,
-  silently skipping the RMSD csv and the holo/apo confidence scores for that design.
-- `--rg_loss` previously fed a term computed from `sample_atom_coords`, which the sampler
-  produces under `torch.no_grad()`; it carried no gradient, so setting the flag did
-  nothing.
-- The bf16 default initially applied to Boltz-1 as well, which upstream runs at fp32.
-
-Measurements, per-target results and the statistics behind each change are in the
-commit messages.
+- A plotting exception silently skipped the RMSD csv and confidence scores for a design.
+- `--rg_loss` fed a no-gradient term and did nothing when set.
+- bf16 initially applied to Boltz-1, which upstream runs at fp32.
 
 ## [3.0.0] - 2026-09-15
 ### Fixed
