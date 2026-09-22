@@ -946,11 +946,36 @@ def boltz_hallucination(
                         "plddt_loss": plddt_loss,
                         "i_pae_loss": i_pae_loss,
                         "pae_loss": pae_loss,
-                        "rg_loss": rg_loss,
                     }
                 )
+                # The coordinate-based rg_loss is reported, not optimized: the sampler
+                # runs under no_grad so sample_atom_coords carries no gradient. The
+                # differentiable distogram version below is what --rg_loss now drives.
+                print(f"[rg-coords] rg={rg.item():.1f} (reported only, no gradient)")
 
                 plddt_loss_history.append(plddt_loss.item())
+
+            # Differentiable radius-of-gyration penalty computed from the DISTOGRAM.
+            # The existing add_rg_loss() reads sample_atom_coords, which the sampler
+            # produces inside torch.no_grad(), so it carries no gradient and can only
+            # report. This one does steer. Rg^2 = <d_ij^2>/2 over binder pairs; note the
+            # distogram caps at ~24.5A so very extended chains are under-measured, but
+            # the gradient still pushes mass out of the far bins.
+            # BOLTZDESIGN_DGRAM_RG=<weight>, default 0 = off.
+            _rgw = float(os.environ.get("BOLTZDESIGN_DGRAM_RG", "") or
+                         (loss_scales or {}).get("rg_loss", 0) or 0)
+            if _rgw > 0:
+                _p = torch.softmax(pdist, dim=-1)
+                _d2 = (_p * (mid_pts.to(pdist.device) ** 2)).sum(-1)
+                _m2 = chain_mask[:, :, None] * chain_mask[:, None, :]
+                _rg = torch.sqrt((_d2 * _m2).sum() / (2.0 * _m2.sum() + 1e-8) + 1e-8)
+                _n = chain_mask.sum()
+                _rg_th = 2.38 * torch.pow(_n.float(), 0.365)
+                losses["dgram_rg"] = torch.nn.functional.elu(_rg - _rg_th)
+                if loss_scales is not None:
+                    loss_scales = {**loss_scales, "dgram_rg": _rgw}
+                print(f"[dgram-rg] Rg={_rg.item():.1f} thr={_rg_th.item():.1f} "
+                      f"loss={losses['dgram_rg'].item():.3f} w={_rgw}")
 
             bins = mid_points < 8.0
             px = torch.sum(torch.softmax(pdist, dim=-1)[:, :, :, bins], dim=-1)

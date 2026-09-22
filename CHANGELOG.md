@@ -43,6 +43,22 @@ All notable changes to this project will be documented in this file.
   to fp32 in both codebases; bf16 reaches only the trunk and the confidence head.
 
 ### Added
+- `--rg_loss` now drives a differentiable radius-of-gyration penalty computed from the
+  distogram, and works in distogram-only mode. It previously fed `add_rg_loss()`, which
+  reads `sample_atom_coords` -- produced inside the sampler's `torch.no_grad()` block
+  (`diffusionv2.py:455`) -- so the term carried no gradient and setting the flag did
+  nothing. The coordinate value is still printed, marked as reported-only. Default stays
+  0.0, so behaviour is unchanged unless the flag is set.
+  Measured on BHRF1 (distogram-only, n=4/arm): `--rg_loss 0.5` took holo Rg from 17.8 to
+  13.7 A, non-local contacts from 15.4 to 22.8, and designs under 2 A holo/apo RMSD from
+  1/4 to 3/4; `2.0` behaved the same.
+  NOT a recommended default. Across three targets it redistributes rather than improves:
+  baseline, `num_intra_contacts 6`, and `rg_loss 0.5` each score exactly 8/12 designs
+  under 2 A (baseline BHRF1 1/4 PDL1 3/4 FAD 4/4; ni=6 2/4, 4/4, 2/4; rg=0.5 3/4, 2/4,
+  3/4). Use `rg_loss` on groove targets whose designs come out extended, and
+  `num_intra_contacts 6` on under-packed protein targets; leave small molecules alone.
+  A contact count below ~15 per residue (|i-j|>9, <14 A) is the diagnostic for which.
+
 - `--save_confidence_npz` (default false) gates the full per-residue plddt and per-pair
   PAE `.npz` files written next to every predicted structure. The PAE array is N^2 --
   ~170 KB per structure at 220 tokens, two per design (holo+apo), growing quadratically
