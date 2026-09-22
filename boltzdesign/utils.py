@@ -793,6 +793,7 @@ def process_design_results(
     alphabet,
     redo_boltz_predict=True,
     show_animation=False,
+    save_plots=False,
     save_trajectory=False,
 ):
     """Process and save design results"""
@@ -828,8 +829,10 @@ def process_design_results(
             boltz_model_version, show_logmd=False
         )
     
-    # Plot and save loss history
-    try:
+    # Plot and save loss history. Building the 125-frame distogram/sequence animations
+    # costs ~4.9s per design and nothing reads them on a normal run, so it is opt-in.
+    if save_plots or show_animation:
+      try:
         plot_loss_history(
             loss_history, con_loss_history, i_con_loss_history,
             directories['loss'], target_name, itr, config['length']
@@ -850,9 +853,10 @@ def process_design_results(
                 f"<div style='flex:0.6'>{sequence_ani.to_jshtml()}</div>"
                 f"</div>"
             ))
-    except Exception as e:
+      except Exception as e:
+        # previously `return None`, which silently skipped the RMSD csv and the
+        # confidence scores below whenever plotting failed
         print(f"Error plotting loss history: {str(e)}")
-        return None
     
     # Save RMSD to CSV
     rmsd_csv_path = os.path.join(directories['results_final'], "rmsd_results.csv")

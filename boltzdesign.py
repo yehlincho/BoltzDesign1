@@ -380,9 +380,25 @@ Use this OR pdb_path/pdb_target_ids, not both.""",
         help="Run Rosetta energy calculation (protein targets only)",
     )
     parser.add_argument("--redo_boltz_predict", type=str2bool, default=False, help="Redo Boltz prediction")
+    parser.add_argument(
+        "--save_plots",
+        type=str2bool,
+        default=False,
+        help="Save the loss-history plot and the distogram/sequence animations for each "
+        "design. Off by default: building the animations costs about 4.9s per design "
+        "(~2.4%% of a design) and nothing reads them on a normal run. --show_animation "
+        "implies this.",
+    )
 
     ## Visualization
-    parser.add_argument("--show_animation", type=str2bool, default=True, help="Show animation")
+    parser.add_argument(
+        "--show_animation",
+        type=str2bool,
+        default=False,
+        help="Build and display the distogram/sequence animations (notebook only). Was "
+        "default-True, which meant every CLI run built the 125-frame GIFs and printed an "
+        "HTML repr to stdout; implies --save_plots.",
+    )
     parser.add_argument("--save_trajectory", type=str2bool, default=False, help="Save trajectory")
 
     args = parser.parse_args()
@@ -581,6 +597,7 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
         show_animation=args.show_animation,
         save_trajectory=args.save_trajectory,
         redo_boltz_predict=args.redo_boltz_predict,
+        save_plots=args.save_plots,
     )
 
     print("Boltz design step completed!")

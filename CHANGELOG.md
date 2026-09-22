@@ -39,6 +39,17 @@ All notable changes to this project will be documented in this file.
   to fp32 in both codebases; bf16 reaches only the trunk and the confidence head.
 
 ### Added
+- `--show_animation` now defaults to **false** and `--save_plots` (new, default false)
+  gates the per-design loss plot and the distogram/sequence animations. `show_animation`
+  had defaulted to true, so every run -- including every CLI run -- built two 125-frame
+  GIFs plus a PNG per design and printed an IPython HTML repr to stdout. Measured on FAD:
+  `process_design_results` 4.9s -> 0.16s per design, about 2.4% of a design, with the
+  RMSD csv and confidence scores unaffected. Pass `--save_plots True` (or
+  `--show_animation True`, which implies it) to get them back.
+- Fixed: an exception while plotting used to `return None` out of
+  `process_design_results`, silently skipping the RMSD csv and the holo/apo confidence
+  scores for that design. It now reports the error and continues.
+
 - `BOLTZDESIGN_AUTOCAST=bf16` runs the trunk forward under bf16 autocast, casting the
   distogram, pLDDT, PAE and coordinates back to fp32 before the loss math; default is
   unset, i.e. fp32. The design loop calls the model directly rather than through the

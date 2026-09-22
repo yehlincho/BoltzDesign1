@@ -1696,6 +1696,7 @@ def run_boltz_design(
     loss_scales=None,
     num_workers=1,
     show_animation=False,
+    save_plots=False,
     save_trajectory=False,
     redo_boltz_predict=True,
     gpu_id=0,
@@ -1858,7 +1859,7 @@ def run_boltz_design(
                 traj_plddt_list, structure, config, directories,
                 yaml_path, target_binder_input, itr, loss_scales,
                 boltz_path, boltz_model_version, alphabet,
-                redo_boltz_predict, show_animation, save_trajectory
+                redo_boltz_predict, show_animation, save_plots, save_trajectory
             )
             
             _bd_report("process_design_results", _t_post)
