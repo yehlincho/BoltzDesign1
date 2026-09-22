@@ -3,6 +3,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Changed
+- `num_intra_contacts` is now **6 for protein targets** (`default_ppi_config.yaml`) and
+  stays 4 for small-molecule, metal, peptide and nucleic targets. The intra-chain contact
+  term asks each binder residue for its `num` best partners at least 9 apart in sequence
+  and within 14 A; protein targets present grooves and flat surfaces that admit
+  under-packed binders, while small-molecule pockets do not -- FAD designs already reach
+  25-27 non-local contacts per residue, roughly 6x the requirement, so the term is
+  saturated there. Measured at 4 designs per arm, counting designs under 2 A holo/apo
+  RMSD: PDL1 3/4 -> 4/4, BHRF1 1/4 -> 2/4 (distogram) and 0/4 -> 2/4 (confidence), while
+  FAD went 4/4 -> 2/4, which is why small molecules stay at 4. The per-type split scores
+  10/12 against 8/12 for any uniform setting, and is at least as good as the previous
+  default on every target tested.
+  Weakly supported: p = 0.64 for the split and p = 0.22 for the protein pooling, n=4 per
+  arm, and AF3 validation could not run, so this rests on Boltz self-consistency alone.
+  Pass `--num_intra_contacts 4` to restore the previous behaviour.
 - When the confidence module is enabled (`--distogram_only False`) it now runs only in
   the temp and hard stages, and the design loop's diffusion sampler uses 50 steps instead
   of 200. The final prediction is untouched at 200 steps, and the gradient is unaffected
