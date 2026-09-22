@@ -18,7 +18,20 @@ _CACHE = {}
 
 def af3_root(path=None):
     """Resolve the AlphaFold 3 install directory."""
-    return os.path.expanduser(path or os.environ.get("AF3_ROOT", "~/alphafold3"))
+    if path:
+        return os.path.expanduser(path)
+    env = os.environ.get("AF3_ROOT")
+    if env:
+        return os.path.expanduser(env)
+    # ~/alphafold3 on this machine is a working directory whose stray run_alphafold.py
+    # belongs to a different AF3 release: it imports
+    # alphafold3.model.components.base_model, which none of the installed af3 envs have
+    # (ImportError: unknown location). Prefer a real checkout when one is present.
+    for cand in ("~/alphafold3_v2", "~/alphafold3"):
+        c = os.path.expanduser(cand)
+        if os.path.isfile(os.path.join(c, "run_alphafold.py")):
+            return c
+    return os.path.expanduser("~/alphafold3")
 
 
 def load_runtime(path=None):

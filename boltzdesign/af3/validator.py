@@ -247,6 +247,20 @@ def ipSAE(
 
 
 
+
+def _input_from_json(Input, json_str):
+    """AF3 releases differ: some accept a JSON list of fold jobs, the installed one
+    wants a single dict (folding_input.Input.from_json calls raw_json.keys()).
+    Try as written, then unwrap a single-element list."""
+    try:
+        return Input.from_json(json_str)
+    except (AttributeError, TypeError, KeyError):
+        data = json.loads(json_str)
+        if isinstance(data, list) and len(data) == 1:
+            return Input.from_json(json.dumps(data[0]))
+        raise
+
+
 class AF3Validator(BaseValidator):
     """
     AlphaFold3-based validator for cross-validation.
@@ -828,7 +842,7 @@ class AF3Validator(BaseValidator):
         )
         
         # Create fold input
-        fold_input = Input.from_json(json_str)
+        fold_input = _input_from_json(Input, json_str)
         fold_input = pipeline.DataPipeline(self.data_pipeline_config).process(fold_input)
         
         try:
@@ -1012,7 +1026,7 @@ class AF3Validator(BaseValidator):
                 try:
                     print(f"\n  Predicting apo structure for {binder_id} (binder only, no target/ligand)...")
                     apo_json_str = self._build_apo_json(binder_seq, binder_id, self.seed)
-                    apo_fold_input = Input.from_json(apo_json_str)
+                    apo_fold_input = _input_from_json(Input, apo_json_str)
                     apo_fold_input = pipeline.DataPipeline(self.data_pipeline_config).process(apo_fold_input)
 
                     apo_inference_results = predict_structure(

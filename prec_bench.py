@@ -22,9 +22,9 @@ import boltz2_sweep as bs
 SOFT, TEMP, HARD = 30, 15, 2
 MODEL = "boltz2"
 ARMS = {
-    "fp32": {},
-    "tf32": {"BOLTZDESIGN_MATMUL_PREC": "high"},
-    "bf16": {"BOLTZDESIGN_AUTOCAST": "bf16"},
+    "bf16": {"BOLTZDESIGN_AUTOCAST": "bf16_all"},
+    "bf16_tf32": {"BOLTZDESIGN_AUTOCAST": "bf16_all", "BOLTZDESIGN_MATMUL_PREC": "high"},
+    "fp32": {"BOLTZDESIGN_AUTOCAST": "fp32"},
 }
 
 
@@ -36,7 +36,7 @@ def cmd(gpu, suffix):
         "learning_rate": "0.1", "num_intra_contacts": "6",
         "helix_loss_min": "-0.3", "helix_loss_max": "-0.3",
         "soft_iteration": str(SOFT), "temp_iteration": str(TEMP), "hard_iteration": str(HARD),
-        "design_samples": "1", "num_designs": "1",
+        "design_samples": "1", "num_designs": "1", "init_seed": "42",
         "run_boltz_design": "True", "run_ligandmpnn": "False",
         "run_alphafold": "False", "run_rosetta": "False",
         "gpu_id": str(gpu), "suffix": suffix, "work_dir": HERE,
