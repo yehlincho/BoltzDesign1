@@ -220,7 +220,10 @@ def _stage_common(common, stage):
     """BOLTZDESIGN_CONFIDENCE_FROM restricts the confidence module to later stages:
     "soft" (default) = every stage, as before; "temp" = skip it in the soft stage;
     "hard" = only the hard stage. Inert when unset, and a no-op for distogram-only runs."""
-    want = os.environ.get("BOLTZDESIGN_CONFIDENCE_FROM", "soft").lower()
+    # Default "temp": when the confidence module is enabled it runs in the temp+hard
+    # stages only. pLDDT/PAE on a still-blurry soft sequence is a weak signal, and the
+    # module is what makes that mode expensive. "soft" restores confidence everywhere.
+    want = os.environ.get("BOLTZDESIGN_CONFIDENCE_FROM", "temp").lower()
     if want == "soft" or common.get("distogram_only", True):
         return common
     order = {"soft": 0, "temp": 1, "hard": 2}
@@ -861,8 +864,8 @@ def boltz_hallucination(
                 # Design-loop-only override: the sampler is inside no_grad, so fewer steps
                 # cannot affect the gradient -- only the coords the confidence head reads.
                 # The final scoring prediction keeps predict_args["sampling_steps"].
-                "num_sampling_steps": int(os.environ.get("BOLTZDESIGN_DESIGN_SAMPLING_STEPS", 0))
-                or predict_args["sampling_steps"],
+                "num_sampling_steps": int(
+                    os.environ.get("BOLTZDESIGN_DESIGN_SAMPLING_STEPS", 50) or 50),
                 "multiplicity_diffusion_train": 1,
                 "diffusion_samples": predict_args["diffusion_samples"],
                 "run_confidence_sequentially": True,

@@ -3,6 +3,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 ### Changed
+- When the confidence module is enabled (`--distogram_only False`) it now runs only in
+  the temp and hard stages, and the design loop's diffusion sampler uses 50 steps instead
+  of 200. The final prediction is untouched at 200 steps, and the gradient is unaffected
+  either way because the sampler runs inside `torch.no_grad()` -- its coordinates only
+  condition the confidence head. Confidence mode goes from ~18 to ~5 minutes per design.
+  Measured across FAD, SAM, PDL1 and BHRF1 (4 designs per config, post-LigandMPNN Boltz
+  filter): confidence-everywhere at 200 steps 37/40, at 50 steps 31/34, temp+hard at 50
+  steps 32/32. In-loop pLDDT is flat from 200 down to 20 steps and PAE is stable to 50.
+  Caveats: n=4 per config, the difference is not significant (p = 0.25), and AF3
+  validation could not run, so this is "no evidence of harm and 3.5x cheaper" rather than
+  better. Restore the old behaviour with `BOLTZDESIGN_CONFIDENCE_FROM=soft` and
+  `BOLTZDESIGN_DESIGN_SAMPLING_STEPS=200`. Confidence-mode runs from before this change
+  are not directly comparable.
 - The design loop now runs its trunk forward under bf16 autocast by default, which is the
   precision upstream Boltz-2 uses for inference (`boltz/main.py:1262`). It had been fp32
   only because `get_distogram` is a fork-only function that bypasses the Lightning trainer
