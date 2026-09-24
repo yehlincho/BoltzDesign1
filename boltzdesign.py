@@ -405,18 +405,24 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
 def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, work_dir):
     """Run the LigandMPNN redesign step"""
     print("Starting LigandMPNN redesign step...")
-    # Setup LigandMPNN config
-    yaml_path = f"{work_dir}/LigandMPNN/run_ligandmpnn_logits_config.yaml"
-    with open(yaml_path, "r") as f:
+    # Setup LigandMPNN config. The config template and model_params ship next to this
+    # script (repo root), so resolve ${CWD} against that rather than --work_dir. Otherwise
+    # any non-default --work_dir breaks here with a confusing FileNotFoundError.
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    template_path = os.path.join(repo_dir, "LigandMPNN", "run_ligandmpnn_logits_config.yaml")
+    with open(template_path, "r") as f:
         mpnn_config = yaml.safe_load(f)
-    
+
     for key, value in mpnn_config.items():
         if isinstance(value, str) and "${CWD}" in value:
-            mpnn_config[key] = value.replace("${CWD}", work_dir)
-    
+            mpnn_config[key] = value.replace("${CWD}", repo_dir)
+
     if not Path(mpnn_config["checkpoint_soluble_mpnn"]).exists():
         raise FileNotFoundError("LigandMPNN checkpoint file not found!")
-    
+
+    # Write the resolved config into this run's output dir (don't mutate the shipped template).
+    os.makedirs(ligandmpnn_dir, exist_ok=True)
+    yaml_path = os.path.join(ligandmpnn_dir, "run_ligandmpnn_logits_config.yaml")
     with open(yaml_path, "w") as f:
         yaml.dump(mpnn_config, f, default_flow_style=False)
     
